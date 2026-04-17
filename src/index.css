@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design Tokens ─────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --gold-400: #d4af37;
+    --gold-500: #b8941f;
+    --slate-950: #020617;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: #020617;
+    color: #cbd5e1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ─── Component Classes ──────────────────────────────────────────────────────── */
+@layer components {
+  /* Glass panel — primary card surface */
+  .glass-panel {
+    @apply bg-slate-900/80 backdrop-blur-md rounded-xl border border-slate-700/60;
+  }
+
+  /* Gold filled button */
+  .btn-gold {
+    @apply bg-gold-500 hover:bg-gold-400 text-slate-950 font-bold py-2 px-4 rounded-lg
+           transition-all duration-200 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  /* Gold outlined button — was referenced but missing */
+  .btn-outline-gold {
+    @apply bg-transparent border border-gold-500/50 text-gold-400
+           hover:bg-gold-500/10 hover:border-gold-400
+           font-bold py-2 px-4 rounded-lg
+           transition-all duration-200 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  /* Text input */
+  .input-field {
+    @apply w-full bg-slate-800 border border-slate-700 rounded-lg text-slate-100 p-2
+           focus:border-gold-500/60 focus:ring-1 focus:ring-gold-500/30
+           outline-none transition-all placeholder:text-slate-600;
+  }
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────────── */
+.custom-scrollbar::-webkit-scrollbar          { width: 6px; height: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track    { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb    { background: #334155; border-radius: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* ─── Transcript Line Slide-In ───────────────────────────────────────────────── */
+@keyframes transcriptSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.transcript-slide-in {
+  animation: transcriptSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ─── Recording Waveform Bar ─────────────────────────────────────────────────── */
+@keyframes waveBar {
+  0%, 100% { transform: scaleY(0.3); }
+  50%       { transform: scaleY(1.0); }
+}
+
+.wave-bar {
+  transform-origin: center;
+  animation: waveBar 0.8s ease-in-out infinite;
+}
+
+/* Stagger wave bars by index (use inline style nth-child or JS inline delay) */
+.wave-bar:nth-child(2)  { animation-delay: 0.1s; }
+.wave-bar:nth-child(3)  { animation-delay: 0.2s; }
+.wave-bar:nth-child(4)  { animation-delay: 0.3s; }
+.wave-bar:nth-child(5)  { animation-delay: 0.15s; }
+.wave-bar:nth-child(6)  { animation-delay: 0.25s; }
+
+/* ─── Gold Glow Shadow Utility ───────────────────────────────────────────────── */
+.shadow-gold {
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.15), 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* ─── Glassmorphism Utility ──────────────────────────────────────────────────── */
+.glass-deep {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.85) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(212, 175, 55, 0.08);
+  border-radius: 1rem;
+}
+
+/* ─── Disposition Toast Flash ────────────────────────────────────────────────── */
+@keyframes toastPop {
+  0%   { transform: scale(0.95); }
+  50%  { transform: scale(1.04); }
+  100% { transform: scale(1.0); }
+}
+
+.toast-pop {
+  animation: toastPop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ─── Sidebar Isometric Icon Effect ──────────────────────────────────────────── */
+.isometric-icon {
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.5));
+}
