@@ -221,7 +221,6 @@ export const CallProvider = ({ children }) => {
   // ── Internal Refs ──────────────────────────────────────────────────────────
   const callTimersRef = useRef([]);
   const disposedRef = useRef(false);
-  const aiUtteranceRef = useRef(null);
 
   const activeCallPhoneRef = useRef('');
   const activeLeadRef = useRef(null);
@@ -252,7 +251,6 @@ export const CallProvider = ({ children }) => {
    * Set to `true` when DispositionGrid calls disposeAndLog().
    * When `true`, the auto-log fallback in the Idle useEffect is skipped.
    */
-  const disposedRef   = useRef(false);
   const userAgentRef  = useRef({ 
     // SIP WebRTC stub - low latency logic for VOS3000 WebRTC-to-SIP Proxy Handshake
     current: {
@@ -321,11 +319,6 @@ export const CallProvider = ({ children }) => {
    * (setActiveSIPCall('') and setCurrentLeadData(null) in the same setTimeout)
    * so the HANGUP auto-log always has real data, never 'Unknown'.
    */
-  const activeCallPhoneRef = useRef('');      // dialed number
-  const activeLeadRef      = useRef(null);    // full lead object
-  const callStartRef       = useRef('');      // ISO timestamp when makeCall fires
-  const callAnswerRef      = useRef('');      // ISO timestamp when Connected
-  const transcriptRef      = useRef([]);      // snapshot of transcript at call end
 
   // ── Inbound Refs ───────────────────────────────────────────────────────────
   const inboundRingTimerRef = useRef(null);
