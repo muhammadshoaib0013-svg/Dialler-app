@@ -1,9 +1,9 @@
 import React from 'react';
-import { LayoutDashboard, PhoneCall, Database, BarChart3, HardDrive, PhoneOff, Shield } from 'lucide-react';
+import { LayoutDashboard, PhoneCall, Database, BarChart3, HardDrive, PhoneOff, Shield, Settings } from 'lucide-react';
 import { useCallContext } from '../../context/CallContext';
 
 export default function NavigationSidebar({ activeTab, setActiveTab }) {
-  const { agentAuth, userRole } = useCallContext();
+  const { agentAuth, userRole, setIsServerSetupOpen } = useCallContext();
   
   const AGENT_TABS = [
     { key: 'cockpit',     icon: <LayoutDashboard size={20} />, label: 'Cockpit'           },
@@ -66,7 +66,23 @@ export default function NavigationSidebar({ activeTab, setActiveTab }) {
       </nav>
       
       {/* System Status */}
-      <div className="w-full px-4 mb-2 mt-auto">
+      <div className="w-full px-4 mb-2 mt-auto space-y-2">
+        {/* Admin Server Settings */}
+        {userRole === 'admin' && (
+          <button
+            onClick={() => setIsServerSetupOpen(true)}
+            className="
+              w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl
+              text-slate-500 hover:text-gold-400 hover:bg-gold-500/5
+              border border-transparent hover:border-gold-500/20
+              transition-all duration-200 group
+            "
+            title="VOS3000 Server Settings"
+          >
+            <Settings size={15} className="group-hover:rotate-45 transition-transform duration-300" />
+            <span className="text-[12px] font-medium tracking-wide">Server Settings</span>
+          </button>
+        )}
         <div className="relative p-4 bg-slate-900/50 backdrop-blur-md rounded-xl border border-slate-800/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] overflow-hidden group">
            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
            <PhoneOff className="mx-auto text-slate-500 mb-2 drop-shadow-md group-hover:text-cyan-400 transition-colors duration-300" size={22} />

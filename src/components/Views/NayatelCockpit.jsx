@@ -197,7 +197,7 @@ export default function NayatelCockpit() {
   }, [isDialing]);
 
   useEffect(() => {
-    transcriptRef.current?.scrollIntoView({ behavior: 'smooth' });
+    transcriptRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [transcriptLines, currentSubtitle]);
 
   return (
@@ -206,26 +206,26 @@ export default function NayatelCockpit() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -5 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className="space-y-6 max-w-[1800px] mx-auto h-full flex flex-col pt-2"
+      className="max-w-[1800px] mx-auto w-full flex flex-col gap-4 pb-12"
     >
 
       {/* ── Row 1: Cockpit Core (Dialpad + Auto Voice) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[500px]">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[280px]">
         
         {/* Dialpad Panel */}
-        <div className="lg:col-span-3">
+        <div className="lg:col-span-3 min-h-0">
           <div className="h-full transform transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,232,255,0.05)] rounded-2xl">
             <DialPad />
           </div>
         </div>
 
         {/* Smart Voice & Execution Panel */}
-        <div className="lg:col-span-9 flex flex-col space-y-6">
+        <div className="lg:col-span-9 flex flex-col min-h-[250px]">
            <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-xl overflow-hidden relative h-full">
               {/* Animated Background Glow */}
               <div className="absolute -top-32 -right-32 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
               
-              <div className="p-4 border-b border-slate-800/80 flex justify-between items-center bg-slate-900/90">
+              <div className="px-4 py-2 border-b border-slate-800/80 flex justify-between items-center bg-slate-900/90">
                  <h3 className="font-bold text-slate-100 uppercase tracking-widest text-sm flex items-center">
                     <span className="w-2 h-2 bg-gold-400 rounded-full mr-2 shadow-[0_0_8px_rgba(212,175,55,1)]"></span>
                     Execution Engine
@@ -246,7 +246,7 @@ export default function NayatelCockpit() {
                    </div>
                  )}
               </div>
-              <div className="p-2 h-[calc(100%-60px)]">
+              <div className="p-1 h-[calc(100%-42px)]">
                  {/* We wrap AutoVoicePanel here to reuse existing logic while injecting new theme visually via parent */}
                  <div className="h-full [&>div]:h-full [&>div]:shadow-none [&>div]:bg-transparent [&>div]:border-none">
                     <AutoVoicePanel />
@@ -258,7 +258,7 @@ export default function NayatelCockpit() {
 
       {/* ── Call Transcript Strip (Now 100% Width between components) ── */}
       {(callStatus === 'Connected' || isTTSPlaying || isAISpeaking || transcriptLines.length > 0) && (
-        <div className="w-full bg-slate-900/90 border border-slate-700/80 rounded-2xl overflow-hidden shadow-xl backdrop-blur-xl flex flex-col h-[180px]">
+        <div className="w-full bg-slate-900/90 border border-slate-700/80 rounded-2xl overflow-hidden shadow-xl backdrop-blur-xl flex flex-col min-h-[160px] shrink-0">
           <div className="flex items-center justify-between px-5 py-3 bg-slate-950/80 border-b border-slate-800 shrink-0">
             <span className={`text-xs font-bold tracking-widest uppercase transition-colors duration-300 ${isTTSPlaying || isAISpeaking ? 'text-purple-400' : 'text-gold-400'}`}>
               {isTTSPlaying || isAISpeaking ? '🎤 AI Broadcasting' : '📝 Live Transcript'}
@@ -266,15 +266,15 @@ export default function NayatelCockpit() {
             <SentimentBadge sentiment={sentimentScore} />
           </div>
           
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-3">
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
             {(isTTSPlaying || isAISpeaking) && currentSubtitle && (
-              <p dir="auto" className="text-purple-300 text-sm text-center font-medium leading-relaxed animate-pulse">
+              <p dir="auto" className="text-purple-300 text-base text-center font-medium leading-relaxed animate-pulse">
                 "{currentSubtitle}"
               </p>
             )}
 
             {!(isTTSPlaying || isAISpeaking) && transcriptLines.length === 0 && (
-              <p className="text-slate-600 italic text-sm text-center py-6 animate-pulse">
+              <p className="text-slate-600 italic text-base text-center py-6 animate-pulse">
                 Waiting for audio stream...
               </p>
             )}
@@ -295,9 +295,9 @@ export default function NayatelCockpit() {
                     >
                       {line.role === 'agent' ? 'AGT' : 'CST'}
                     </span>
-                    <span dir="auto" className={`text-sm leading-relaxed w-full ${line.role === 'agent' ? 'text-slate-200' : 'text-slate-400'}`}>
+                    <span dir="auto" className={`text-base leading-[1.6] tracking-wide w-full ${line.role === 'agent' ? 'text-slate-200' : 'text-slate-400'}`}>
                       {line.text}
-                      <span className="ml-3 text-[10px] text-slate-600 font-mono inline-block" dir="ltr">{line.timestamp}</span>
+                      <span className="ml-3 text-[11px] text-slate-500 font-mono inline-block" dir="ltr">{line.timestamp}</span>
                     </span>
                   </>
                 )}
@@ -317,11 +317,11 @@ export default function NayatelCockpit() {
       </div>
 
       {/* ── Row 3: Advanced Lead CRM & Script Matrix ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pb-6">
-        <div className="lg:col-span-5 h-[500px]">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[400px]">
+        <div className="lg:col-span-5 h-full min-h-0 flex flex-col">
            <CockpitCRM screenPopData={screenPopData} inboundStatus={inboundStatus} />
         </div>
-        <div className="lg:col-span-7 h-[500px] flex flex-col">
+        <div className="lg:col-span-7 h-full min-h-0 flex flex-col">
            <div className="glass-panel flex-1 min-h-0 flex flex-col rounded-2xl border-gold-500/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-gold-500 to-cyan-400 z-10"></div>
               {/* ScriptPanel wrapper — flex chain enables inner scroll */}

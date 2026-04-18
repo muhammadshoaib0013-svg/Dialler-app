@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { sendWhatsAppReceipt } from '../utils/whatsapp';
 import { LiveSubtitleSystem } from '../services/LiveSubtitleSystem';
-import edgeTTS from '../services/EdgeTTSManager';
+import edgeTTS from '../services/EdgeTTS';
+import { loadVosConfig, saveVosConfig } from '../components/Admin/ServerSetupModal';
 
 // ─── Script Definitions (Migrated from ScriptPanel) ──────────────────────────────
 export const SCRIPT_TEMPLATES = [
@@ -270,6 +271,31 @@ export const CallProvider = ({ children }) => {
   const [vosBalance, setVosBalance]           = useState(0.00);
   const [vosStatus, setVosStatus]             = useState('Connecting...');
   const [sipLogs, setSipLogs]                 = useState([]);
+  const [isServerSetupOpen, setIsServerSetupOpen] = useState(false);
+
+  // ── Dynamic VOS3000 Config ──────────────────────────────────────────────────
+  const [vosConfig, setVosConfig] = useState(() => {
+    const cfg = loadVosConfig();
+    return cfg || { serverIp: 'vos.gateway', wssPort: '5060', extension: '', password: '' };
+  });
+
+  // Listen for config changes made through the Admin modal
+  useEffect(() => {
+    const handleStorage = (e) => {
+      if (e.key === 'hb_vos_config_v1') {
+        const cfg = loadVosConfig();
+        if (cfg) setVosConfig(cfg);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  // Check if first boot (no config saved yet)
+  useEffect(() => {
+    const cfg = loadVosConfig();
+    if (!cfg) setIsServerSetupOpen(true);
+  }, []);
 
   // Mock Ping Gateway
   const pingVOSGateway = useCallback(() => {
@@ -407,13 +433,32 @@ export const CallProvider = ({ children }) => {
           setIsAISpeaking(true);
           setIsTTSPlaying(true);
           
-          edgeTTS.speak({
-            text: playbackText,
-            voice: 'ur-PK-GulNeural',
-            onStart: () => setCurrentSubtitle('AI Assistant initiating script...'),
-            onSubtitle: (txt) => setCurrentSubtitle(`AI: ${txt}`),
-            onWord: (word) => { }, 
-            onEnd: () => {
+          // Instantly sync the AI script text directly into the Live Transcript
+          setTranscriptLines(prev => {
+             const updated = [
+               ...prev,
+               {
+                 role: 'agent', // Shows up as AI/Agent in the UI
+                 text: `💬 [AI Broadcast]: ${playbackText}`,
+                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                 section: null,
+               }
+             ];
+             transcriptRef.current = updated;
+             return updated;
+          });
+
+          // ── Foolproof Native SpeechSynthesis Trigger ──
+          const utterance = new SpeechSynthesisUtterance(playbackText);
+          utterance.volume = 1; // Explicit volume enforcement
+          configureTTSVoice(utterance, playbackText);
+          
+          utterance.onstart = () => {
+             setCurrentSubtitle('AI Assistant initiating script...');
+             setTimeout(() => setCurrentSubtitle(`AI: ${playbackText}`), 500);
+          };
+          
+          utterance.onend = () => {
               setIsAISpeaking(false);
               setIsTTSPlaying(false);
               setCurrentSubtitle('');
@@ -422,9 +467,26 @@ export const CallProvider = ({ children }) => {
               if (autoDialerActive && !agentHandedOff) {
                 setTimeout(() => { if (callStatus === 'Connected') endCall(); }, 2000);
               }
-            },
-            onError: (err) => console.error('[EdgeTTS] Error:', err)
-          });
+          };
+
+          utterance.onerror = (err) => {
+             console.error('[SpeechSynthesis] Error:', err);
+             setIsAISpeaking(false);
+             setIsTTSPlaying(false);
+          };
+
+          aiUtteranceRef.current = utterance;
+          console.log('TTS Triggered', utterance.text);
+          window.speechSynthesis.speak(utterance);
+          
+          // Legacy EdgeTTS Fallback Hook
+          try {
+             edgeTTS.speak({
+                text: '', // silent ping just in case
+                onEnd: () => {}
+             });
+          } catch(e) {}
+
         }, 500);
       }
 
@@ -512,6 +574,17 @@ export const CallProvider = ({ children }) => {
   const makeCall = useCallback((phoneNumber) => {
     if (!phoneNumber) return;
 
+    // Unlock voice synthesis modules on human interaction
+    try {
+       edgeTTS.unlock();
+       if (window.speechSynthesis) {
+           const u = new SpeechSynthesisUtterance('');
+           // Unlock by playing a silent, empty utterance on the first user interaction
+           u.volume = 0;
+           window.speechSynthesis.speak(u);
+       }
+    } catch(e) {}
+
     // Idempotency guard — functional updater reads committed state
     setCallStatus(prev => {
       if (prev !== 'Idle') return prev;
@@ -546,7 +619,7 @@ export const CallProvider = ({ children }) => {
     setIsAISpeaking(false);
     setActiveScriptSection(null);
 
-    setSipLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 })}] -> INVITE sip:${phoneNumber}@vos.gateway SIP/2.0`]);
+    setSipLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 })}] -> INVITE sip:${phoneNumber}@${vosConfig.serverIp}:${vosConfig.wssPort} SIP/2.0`]);
 
     // Clear lingering timers before scheduling new ones
     callTimersRef.current.forEach(clearTimeout);
@@ -631,14 +704,9 @@ export const CallProvider = ({ children }) => {
     if (!inboundCall) return;
     clearTimeout(inboundRingTimerRef.current);
 
-    // 1. Play Urdu IVR welcome via Web Speech API
+    // 1. Play Urdu IVR welcome via EdgeTTS (bypasses Chromium mic ducking)
     setIvrPlaying(true);
-    window.speechSynthesis.cancel();
-
-    const utt   = new SpeechSynthesisUtterance(IVR_URDU_MESSAGE);
-    utt.rate    = 0.82;
-    utt.pitch   = 1.05;
-
+    
     const finishIVR = () => {
       setIvrPlaying(false);
       setInboundStatus('answered');
@@ -664,9 +732,12 @@ export const CallProvider = ({ children }) => {
       }, ...prev]);
     };
 
-    utt.onend   = finishIVR;
-    utt.onerror = finishIVR;
-    window.speechSynthesis.speak(utt);
+    edgeTTS.speak({
+       text: IVR_URDU_MESSAGE,
+       voice: 'ur-PK-GulNeural',
+       onEnd: finishIVR,
+       onError: finishIVR
+    });
 
     // 2. Build screen pop — match CRM leads + outbound call history
     const matchedLead = customerLeads.find(l => l.phone === inboundCall.phone);
@@ -884,6 +955,8 @@ export const CallProvider = ({ children }) => {
     // VOS integration
     vosBalance, vosStatus,
     sipLogs, pingVOSGateway,
+    vosConfig, setVosConfig,
+    isServerSetupOpen, setIsServerSetupOpen,
     // Role
     userRole,
   };

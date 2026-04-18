@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Users, Phone, Filter, TrendingUp, Target, Clock, Ban, PhoneOff, MessageCircle, CheckCircle2, Search } from 'lucide-react';
 import { useCallContext } from '../../context/CallContext';
+import Papa from 'papaparse';
 
 // ─── Config Maps ───────────────────────────────────────────────────────────────
 const DISPO_META = {
@@ -157,26 +158,21 @@ export default function CustomerLeadsPanel() {
            
            <button
              onClick={() => {
-                import('papaparse').then(Papa => {
                    const exportData = filtered.map(lead => {
-                      // Calculate mocked Lead Temp & Local Time for CSV requirement
-                      const mockedCalls = Math.floor(Math.random() * 8);
-                      const temp = mockedCalls > 5 ? 'Hot 🌶️' : mockedCalls > 2 ? 'Warm 🔥' : 'Cold ❄️';
-                      const localTimeOff = Math.floor(Math.random() * 5) - 2; // Mock timezone diff
-                      const t = new Date(); t.setHours(t.getHours() + localTimeOff);
-                      const localTimeStr = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      // Format duration to MM:SS string or numeric if preferred
+                      const mins = Math.floor((lead.duration || 0) / 60);
+                      const secs = (lead.duration || 0) % 60;
+                      const formattedDuration = `${mins}m ${secs}s`;
                       
                       return {
-                         "Customer Name": lead.name,
+                         "Lead Name": lead.name || 'Unknown',
                          "Phone": lead.phone,
                          "Disposition": lead.disposition,
-                         "Duration (s)": lead.duration,
-                         "Lead Temperature": temp,
-                         "Local Time of Call": localTimeStr,
+                         "Duration": formattedDuration,
                          "Call Time (System)": new Date(lead.time).toLocaleString()
                       };
                    });
-                   const csv = Papa.default.unparse(exportData);
+                   const csv = Papa.unparse(exportData);
                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
                    const link = document.createElement("a");
                    link.href = URL.createObjectURL(blob);
@@ -184,7 +180,6 @@ export default function CustomerLeadsPanel() {
                    document.body.appendChild(link);
                    link.click();
                    document.body.removeChild(link);
-                });
              }}
              className="flex items-center gap-2 px-4 py-1.5 bg-slate-800/80 hover:bg-gold-500/20 text-slate-300 hover:text-gold-400 border border-slate-700 hover:border-gold-500/50 rounded-full text-[11px] font-bold uppercase tracking-widest transition-all"
            >
