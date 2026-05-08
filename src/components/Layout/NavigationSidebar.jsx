@@ -1,9 +1,10 @@
-import React from 'react';
-import { LayoutDashboard, PhoneCall, Database, BarChart3, HardDrive, PhoneOff, Shield, Settings } from 'lucide-react';
+import React, { useState } from 'react';
+import { LayoutDashboard, PhoneCall, Database, BarChart3, HardDrive, PhoneOff, Shield, Settings, Menu, X } from 'lucide-react';
 import { useCallContext } from '../../context/CallContext';
 
 export default function NavigationSidebar({ activeTab, setActiveTab }) {
   const { agentAuth, userRole, setIsServerSetupOpen } = useCallContext();
+  const [{ isOpen }, setDrawerState] = useState({ isOpen: false });
   
   const AGENT_TABS = [
     { key: 'cockpit',     icon: <LayoutDashboard size={20} />, label: 'Cockpit'           },
@@ -21,12 +22,39 @@ export default function NavigationSidebar({ activeTab, setActiveTab }) {
   const TABS = userRole === 'admin' ? [...AGENT_TABS, ...ADMIN_ONLY_TABS] : AGENT_TABS;
 
   return (
-    <aside className="w-68 bg-slate-950 border-r border-slate-800 flex flex-col items-center py-6 z-10 hidden md:flex shrink-0 shadow-2xl relative transition-all duration-300">
-      {/* Nayatel Glassmorphism sidebar accent */}
-      <div className="absolute top-0 right-0 w-[2px] h-full bg-gradient-to-b from-cyan-400/50 via-gold-500/30 to-transparent" />
+    <>
+      {/* Mobile Top Bar */}
+      <div className="md:hidden fixed top-0 left-0 w-full h-[56px] z-50 bg-slate-950 border-b border-slate-800 flex items-center px-4">
+        <button 
+          onClick={() => setDrawerState({ isOpen: true })}
+          className="text-slate-300 hover:text-white transition-colors p-2 -ml-2 rounded-lg"
+        >
+          <Menu size={24} />
+        </button>
+      </div>
 
-      {/* Brand & Agent Info */}
-      <div className="w-full px-6 mb-8 flex flex-col items-center">
+      {/* Mobile Backdrop */}
+      {isOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/60 z-[59]"
+          onClick={() => setDrawerState({ isOpen: false })}
+        />
+      )}
+
+      <aside className={`fixed md:relative top-0 left-0 h-full w-68 bg-slate-950 border-r border-slate-800 flex flex-col items-center py-6 z-[60] md:z-10 shrink-0 shadow-2xl transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:flex`}>
+        {/* Mobile Close Button */}
+        <button 
+          className="md:hidden absolute top-4 right-4 text-slate-400 hover:text-white p-1 z-50"
+          onClick={() => setDrawerState({ isOpen: false })}
+        >
+          <X size={20} />
+        </button>
+
+        {/* Nayatel Glassmorphism sidebar accent */}
+        <div className="absolute top-0 right-0 w-[2px] h-full bg-gradient-to-b from-cyan-400/50 via-gold-500/30 to-transparent" />
+
+        {/* Brand & Agent Info */}
+        <div className="w-full px-6 mb-8 flex flex-col items-center mt-6 md:mt-0">
         <div className="relative mb-4 group cursor-pointer">
           <div className="absolute inset-0 bg-cyan-400/20 blur-xl rounded-full group-hover:bg-cyan-400/40 transition-all duration-500"></div>
           <div className="relative w-20 h-20 rounded-full bg-slate-900 border-[3px] border-gold-400/80 flex items-center justify-center overflow-hidden shadow-[0_0_25px_rgba(0,232,255,0.15)] group-hover:shadow-[0_0_35px_rgba(0,232,255,0.3)] transition-all duration-500">
@@ -90,6 +118,7 @@ export default function NavigationSidebar({ activeTab, setActiveTab }) {
         </div>
       </div>
     </aside>
+    </>
   );
 }
 

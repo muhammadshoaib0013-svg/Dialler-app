@@ -16,6 +16,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { randomUUID } from 'crypto';
 import cors from 'cors';
+import db from './db.js';
 
 const app  = express();
 const PORT = 3001;
@@ -25,6 +26,213 @@ app.use(express.json());
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/tts/health', (_req, res) => res.json({ ok: true, engine: 'edge-neural' }));
+
+// ── Call Logs ────────────────────────────────────────────────────────────────
+app.post('/api/calls', (req, res) => {
+  const { agentId, agentName, campaign, customerName, phone, callStartTime, callAnswerTime, callEndTime, totalDuration, ringDuration, talkDuration, disposition, dispositionLabel, sentiment, whatsappSent, recordingId, recordingUrl, transcript } = req.body;
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO call_logs (
+        agent_id, agent_name, campaign, customer_name, phone, call_start, call_answer, call_end, total_duration, ring_duration, talk_duration, disposition, disposition_label, sentiment, whatsapp_sent, recording_id, recording_url, transcript
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const info = stmt.run(agentId, agentName, campaign, customerName, phone, callStartTime, callAnswerTime, callEndTime, totalDuration, ringDuration, talkDuration, disposition, dispositionLabel, sentiment, whatsappSent, recordingId, recordingUrl, transcript);
+    res.json({ ok: true, id: info.lastInsertRowid });
+  } catch (err) {
+    console.error('Insert call_logs error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/calls', (req, res) => {
+  const { agentId, limit = 100 } = req.query;
+  try {
+    const stmt = db.prepare(`SELECT * FROM call_logs WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?`);
+    const logs = stmt.all(agentId, parseInt(limit, 10));
+    res.json(logs);
+  } catch (err) {
+    console.error('Get call_logs error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Customer Leads ────────────────────────────────────────────────────────────
+app.post('/api/leads', (req, res) => {
+  const { name, phone, disposition, time, duration, sentiment, recordingId, whatsappSent } = req.body;
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO customer_leads (
+        name, phone, disposition, call_time, duration, sentiment, recording_id, whatsapp_sent
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const info = stmt.run(name, phone, disposition, time, duration, sentiment, recordingId, whatsappSent ? 1 : 0);
+    res.json({ ok: true, id: info.lastInsertRowid });
+  } catch (err) {
+    console.error('Insert customer_leads error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/leads', (req, res) => {
+  const { limit = 200 } = req.query;
+  try {
+    const stmt = db.prepare(`SELECT * FROM customer_leads ORDER BY created_at DESC LIMIT ?`);
+    const leads = stmt.all(parseInt(limit, 10));
+    res.json(leads);
+  } catch (err) {
+    console.error('Get customer_leads error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/leads/:id', (req, res) => {
+  try {
+    const stmt = db.prepare(`DELETE FROM customer_leads WHERE id = ?`);
+    stmt.run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete customer_leads error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── VOS3000 Ping ─────────────────────────────────────────────────────────────
+app.post('/api/vos/ping', (req, res) => {
+  const { serverIp, wssPort } = req.body;
+  if (!serverIp || !wssPort) return res.status(400).json({ ok: false, error: 'Missing serverIp or wssPort' });
+
+  const start = Date.now();
+  const ws = new WebSocket(`wss://${serverIp}:${wssPort}/ws`);
+  
+  const timeout = setTimeout(() => {
+    if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
+    res.json({ ok: false, error: 'Timeout' });
+  }, 3000);
+
+  ws.on('open', () => {
+    clearTimeout(timeout);
+    ws.close();
+    res.json({ ok: true, latency: Date.now() - start });
+  });
+
+  ws.on('error', (err) => {
+    clearTimeout(timeout);
+    res.json({ ok: false, error: err.message });
+  });
+});
+
+// ── VOS3000 Balance ──────────────────────────────────────────────────────────
+app.get('/api/vos/balance', async (req, res) => {
+  const { serverIp, apiKey } = req.query;
+  try {
+    const response = await fetch(`http://${serverIp}/api/balance`);
+    if (response.ok) {
+      const data = await response.json();
+      res.json({ ok: true, balance: data.balance ?? 0 });
+    } else {
+      res.json({ ok: false, balance: null });
+    }
+  } catch (err) {
+    res.json({ ok: false, balance: null, error: err.message });
+  }
+});
+
+// ── WhatsApp Business Cloud API ──────────────────────────────────────────────
+app.post('/api/whatsapp/send', async (req, res) => {
+  const { to, customerName, disposition, recordingId, agentName = 'Agent' } = req.body;
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneId = process.env.WHATSAPP_PHONE_ID;
+
+  if (!token || !phoneId) {
+    return res.status(500).json({ ok: false, error: 'WhatsApp credentials missing' });
+  }
+
+  // Format Pakistani phone number
+  let phone = String(to).replace(/\D/g, '');
+  if (phone.startsWith('0')) {
+    phone = '92' + phone.substring(1);
+  } else if (!phone.startsWith('92') && phone.length === 10) {
+    phone = '92' + phone;
+  }
+
+  const url = `https://graph.facebook.com/v18.0/${phoneId}/messages`;
+
+  let templateName = null;
+  if (disposition === 'SALE') templateName = 'order_confirmation';
+  if (disposition === 'CBHOLD') templateName = 'callback_scheduled';
+
+  const sendTextFallback = async (errorMsg) => {
+    console.warn(`[WhatsApp] Template failed (${errorMsg}), trying text fallback for ${phone}`);
+    const textMsg = `Thank you ${customerName}! Your order has been confirmed by ${agentName}. Recording: ${recordingId}`;
+    try {
+      const fallbackRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'text',
+          text: { body: textMsg }
+        })
+      });
+      const fallbackData = await fallbackRes.json();
+      if (fallbackRes.ok) {
+        return res.json({ ok: true, messageId: fallbackData.messages?.[0]?.id, fallback: true });
+      } else {
+        return res.json({ ok: false, error: fallbackData.error?.message || 'Fallback failed' });
+      }
+    } catch (err) {
+      return res.json({ ok: false, error: err.message });
+    }
+  };
+
+  if (templateName) {
+    try {
+      const templateRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'template',
+          template: {
+            name: templateName,
+            language: { code: 'ur' }
+          }
+        })
+      });
+      const data = await templateRes.json();
+      if (templateRes.ok) {
+        return res.json({ ok: true, messageId: data.messages?.[0]?.id });
+      } else {
+        await sendTextFallback(data.error?.message);
+      }
+    } catch (err) {
+      await sendTextFallback(err.message);
+    }
+  } else {
+    await sendTextFallback('No template mapped');
+  }
+});
+
+// ── HTTP POST  /api/auth/login ──────────────────────────────────────────────
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  const adminUser = process.env.ADMIN_USER;
+  const adminPass = process.env.ADMIN_PASS;
+
+  if (adminUser && adminPass && username === adminUser && password === adminPass) {
+    return res.json({ ok: true, role: 'admin' });
+  }
+
+  return res.status(401).json({ error: 'Invalid credentials' });
+});
 
 // ── HTTP POST  /api/tts  → returns MP3 binary ─────────────────────────────────
 // Body: { text, voice, rate, pitch }

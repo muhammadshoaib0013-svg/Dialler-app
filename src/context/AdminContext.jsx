@@ -1,9 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { SCRIPT_TEMPLATES as DEFAULT_SCRIPTS } from './CallContext';
 
-// ─── Default Admin Credentials ────────────────────────────────────────────────
-const ADMIN_CREDENTIALS = { username: 'admin', password: '123' };
-
 // ─── localStorage Keys ────────────────────────────────────────────────────────
 const AGENTS_KEY   = 'hb_agents_v1';
 const SCRIPTS_KEY  = 'hb_scripts_v1';
@@ -142,7 +139,7 @@ export const AdminProvider = ({ children }) => {
 
   // ── Login validation for agents (used by CallContext) ──────────────────────
   const validateLogin = useCallback((username, password) => {
-    if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+    if (username === import.meta.env.VITE_ADMIN_USER && password === import.meta.env.VITE_ADMIN_PASS) {
       return { valid: true, role: 'admin', data: { username, extension: 'ADM-01', campaign: 'All' } };
     }
     const agent = agents.find(a => a.agentId === username && a.password === password);

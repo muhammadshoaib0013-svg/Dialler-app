@@ -34,13 +34,13 @@ export default function LoginForm() {
           {error && <div className="p-3 bg-red-900/40 border border-red-500 text-red-200 rounded text-sm">{error}</div>}
           
           <div>
-            <label className="block text-sm text-slate-300 mb-1 tracking-wide">Username <span className="text-slate-500 text-xs">(admin)</span></label>
+            <label className="block text-sm text-slate-300 mb-1 tracking-wide">Username</label>
             <input required type="text" className="input-field" 
               value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} 
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-300 mb-1 tracking-wide">Password <span className="text-slate-500 text-xs">(123)</span></label>
+            <label className="block text-sm text-slate-300 mb-1 tracking-wide">Password</label>
             <input required type="password" className="input-field" 
               value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} 
             />

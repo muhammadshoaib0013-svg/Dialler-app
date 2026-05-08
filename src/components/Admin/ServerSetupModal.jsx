@@ -28,31 +28,38 @@ export function saveVosConfig(cfg) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
 }
 
-// ─── Connection Test Simulator ─────────────────────────────────────────────────
+// ─── Connection Test ──────────────────────────────────────────────────────────
 async function testSIPConnection(cfg) {
-  return new Promise((resolve) => {
-    if (!cfg.serverIp || !cfg.wssPort || !cfg.extension || !cfg.password) {
-      resolve({ ok: false, message: 'All fields are required.' });
-      return;
+  if (!cfg.serverIp || !cfg.wssPort || !cfg.extension || !cfg.password) {
+    return { ok: false, message: 'All fields are required.' };
+  }
+  const wssUrl = `wss://${cfg.serverIp}:${cfg.wssPort}/ws`;
+  
+  try {
+    const res = await fetch('/api/vos/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverIp: cfg.serverIp, wssPort: cfg.wssPort })
+    });
+    const data = await res.json();
+    
+    if (data.ok) {
+      return {
+        ok: true,
+        message: `✓ CONNECTION ESTABLISHED — ${wssUrl}\n  Latency: ${data.latency}ms\n  Extension ${cfg.extension} ready.`,
+      };
+    } else {
+      return {
+        ok: false,
+        message: `✗ CONNECTION FAILED — ${wssUrl}\n  Error: ${data.error}`,
+      };
     }
-    const wssUrl = `wss://${cfg.serverIp}:${cfg.wssPort}/ws`;
-    // Simulate multi-step handshake with random latency
-    setTimeout(() => {
-      // 80% success rate for test feedback realism
-      const success = Math.random() > 0.2;
-      if (success) {
-        resolve({
-          ok: true,
-          message: `✓ REGISTER 200 OK — ${wssUrl}\n  Extension ${cfg.extension} authenticated.`,
-        });
-      } else {
-        resolve({
-          ok: false,
-          message: `✗ 408 Request Timeout — ${wssUrl}\n  VOS3000 node unreachable. Check IP/Port.`,
-        });
-      }
-    }, 1800 + Math.random() * 800);
-  });
+  } catch (err) {
+    return {
+      ok: false,
+      message: `✗ NETWORK ERROR — Could not reach proxy.\n  ${err.message}`,
+    };
+  }
 }
 
 // ─── Input Field Component ──────────────────────────────────────────────────────

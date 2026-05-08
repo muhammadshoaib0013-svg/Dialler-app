@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { sendWhatsAppReceipt } from '../utils/whatsapp';
+import { useWebRTC } from '../hooks/useWebRTC';
 import { LiveSubtitleSystem } from '../services/LiveSubtitleSystem';
-import edgeTTS from '../services/EdgeTTS';
+import edgeTTS from '../services/edgeTtsService';
 import { loadVosConfig, saveVosConfig } from '../components/Admin/ServerSetupModal';
 
 // ─── Script Definitions (Migrated from ScriptPanel) ──────────────────────────────
@@ -297,48 +298,66 @@ export const CallProvider = ({ children }) => {
     if (!cfg) setIsServerSetupOpen(true);
   }, []);
 
-  // Mock Ping Gateway
-  const pingVOSGateway = useCallback(() => {
-    const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
-    setSipLogs(prev => [...prev.slice(-49), `[${timestamp}] -> OPTIONS sip:vos.gateway:5060 SIP/2.0`]);
-    
-    setTimeout(() => {
-      const ts2 = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
-      const isSuccess = Math.random() > 0.2; // 80% success rate for simulation
-      if (isSuccess) {
-        setSipLogs(prev => [...prev.slice(-49), `[${ts2}] <- 200 OK (VOS3000 Node-1 Active)`]);
-      } else {
-        setSipLogs(prev => [...prev.slice(-49), `[${ts2}] <- 408 Request Timeout (VOS3000 Unreachable)`]);
-      }
-    }, Math.floor(Math.random() * 300) + 100); 
-  }, []);
+  const { status: sipStatus, call: sipCall, hangup: sipHangup, mute: sipMute, unmute: sipUnmute } = useWebRTC(
+    vosConfig.extension,
+    vosConfig.password,
+    vosConfig.serverIp,
+    vosConfig.wssPort,
+    () => setCallStatus('Idle')
+  );
 
-  // Mock checking VOS Wallet balance in real-time
+  // Real Ping Gateway
+  const pingVOSGateway = useCallback(async () => {
+    const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+    setSipLogs(prev => [...prev.slice(-49), `[${timestamp}] -> WSS CONNECTION wss://${vosConfig.serverIp}:${vosConfig.wssPort}/ws`]);
+    
+    try {
+      const res = await fetch('/api/vos/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverIp: vosConfig.serverIp, wssPort: vosConfig.wssPort })
+      });
+      const data = await res.json();
+      const ts2 = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+      
+      if (data.ok) {
+        setSipLogs(prev => [...prev.slice(-49), `[${ts2}] <- 200 OK (Connected in ${data.latency}ms)`]);
+      } else {
+        setSipLogs(prev => [...prev.slice(-49), `[${ts2}] <- ERROR (${data.error})`]);
+      }
+    } catch (err) {
+      const ts2 = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+      setSipLogs(prev => [...prev.slice(-49), `[${ts2}] <- FETCH FAILED (${err.message})`]);
+    }
+  }, [vosConfig]);
+
+  // Real checking VOS Wallet balance
   useEffect(() => {
     if (!isAuthenticated) return;
+
+    setVosStatus('Connecting...');
     
-    // Simulate initial connection
-    const connectTimer = setTimeout(() => {
-      setVosStatus('Connected');
-      setVosBalance(250.50); // Initial mock balance
-    }, 1500);
-
-    // Simulate polling for real-time balance updates via VOS API
-    const pollInterval = setInterval(() => {
-      setVosBalance(prev => {
-        // Decrease by small amount continuously if on an active call
-        if (callStatus === 'Connected') {
-          return Math.max(0, prev - (Math.random() * 0.05 + 0.01));
+    const fetchBalance = async () => {
+      try {
+        const res = await fetch(`/api/vos/balance?serverIp=${encodeURIComponent(vosConfig.serverIp)}&apiKey=test`);
+        const data = await res.json();
+        if (data.ok) {
+          setVosBalance(data.balance);
+          setVosStatus('Connected');
+        } else {
+          setVosStatus('Error');
         }
-        return prev;
-      });
-    }, 5000);
-
-    return () => {
-      clearTimeout(connectTimer);
-      clearInterval(pollInterval);
+      } catch (err) {
+        console.error('Failed to fetch VOS balance:', err);
+        setVosStatus('Error');
+      }
     };
-  }, [isAuthenticated, callStatus]);
+
+    fetchBalance();
+    const pollInterval = setInterval(fetchBalance, 30000);
+
+    return () => clearInterval(pollInterval);
+  }, [isAuthenticated, vosConfig.serverIp]);
 
   /**
    * Stable refs — these survive React's batched Idle state transition
@@ -351,20 +370,96 @@ export const CallProvider = ({ children }) => {
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   const loginAgent = async (data) => {
-    // Admin hard credentials
-    if (data.username === 'admin' && data.password === '123') {
-      setAgentAuth({ ...data, username: 'admin', extension: 'ADM-01', campaign: 'All', status: 'PAUSED' });
-      setUserRole('admin');
+    const finalizeLogin = async (role, username, extension) => {
+      setAgentAuth({ ...data, username, extension, campaign: role === 'admin' ? 'All' : 'Default', status: 'PAUSED' });
+      setUserRole(role);
       setIsAuthenticated(true);
-      return;
+      
+      try {
+        const [logsRes, leadsRes] = await Promise.all([
+          fetch(`/api/calls?agentId=${encodeURIComponent(data.username)}&limit=100`),
+          fetch('/api/leads?limit=200')
+        ]);
+        if (logsRes.ok) {
+          const logs = await logsRes.json();
+          setSessionLogs(logs.map(log => ({
+            callStartTime: log.call_start,
+            callAnswerTime: log.call_answer,
+            callEndTime: log.call_end,
+            agentId: log.agent_id,
+            agentName: log.agent_name,
+            campaign: log.campaign,
+            callDirection: 'Outbound',
+            leadId: 'N/A',
+            customerName: log.customer_name,
+            phone: log.phone,
+            totalDuration: log.total_duration,
+            ringDuration: log.ring_duration,
+            talkDuration: log.talk_duration,
+            disposition: log.disposition,
+            dispositionLabel: log.disposition_label,
+            sentiment: log.sentiment,
+            whatsappSent: log.whatsapp_sent,
+            recordingId: log.recording_id,
+            recordingUrl: log.recording_url,
+            transcript: log.transcript,
+            time: log.call_end,
+            duration: log.total_duration,
+            lead: log.customer_name,
+            code: log.disposition,
+          })));
+        }
+        if (leadsRes.ok) {
+          const leads = await leadsRes.json();
+          setCustomerLeads(leads.map(lead => ({
+            id: lead.id,
+            name: lead.name,
+            phone: lead.phone,
+            disposition: lead.disposition,
+            time: lead.call_time,
+            duration: lead.duration,
+            sentiment: lead.sentiment,
+            recordingId: lead.recording_id,
+            whatsappSent: lead.whatsapp_sent === 1,
+          })));
+        }
+      } catch (err) {
+        console.error('Failed to load initial data:', err);
+      }
+    };
+
+    // Admin credentials
+    const envUser = import.meta.env.VITE_ADMIN_USER;
+    const envPass = import.meta.env.VITE_ADMIN_PASS;
+
+    if (envUser && envPass) {
+      if (data.username === envUser && data.password === envPass) {
+        await finalizeLogin('admin', envUser, 'ADM-01');
+        return;
+      }
+    } else {
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: data.username, password: data.password })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.ok && json.role === 'admin') {
+            await finalizeLogin('admin', data.username, 'ADM-01');
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Server auth fallback failed:', err);
+      }
     }
     // Agent credentials — validated against localStorage roster
     const storedAgents = (() => { try { return JSON.parse(localStorage.getItem('hb_agents_v1') || '[]'); } catch { return []; } })();
     const agent = storedAgents.find(a => a.agentId === data.username && a.password === data.password);
     if (agent) {
-      setAgentAuth({ ...data, username: agent.name, extension: agent.extension, campaign: 'Default', status: 'PAUSED' });
-      setUserRole('agent');
-      setIsAuthenticated(true);
+      await finalizeLogin('agent', agent.name, agent.extension);
       return;
     }
     throw new Error('Invalid credentials');
@@ -400,6 +495,19 @@ export const CallProvider = ({ children }) => {
     });
   }, []);
 
+  // ── Synced Refs for callStatus effect ──────────────────────────────────────
+  const autoDialerActiveRef = useRef(autoDialerActive);
+  useEffect(() => { autoDialerActiveRef.current = autoDialerActive; }, [autoDialerActive]);
+
+  const agentHandedOffRef = useRef(agentHandedOff);
+  useEffect(() => { agentHandedOffRef.current = agentHandedOff; }, [agentHandedOff]);
+
+  const voiceScriptRef = useRef(voiceScript);
+  useEffect(() => { voiceScriptRef.current = voiceScript; }, [voiceScript]);
+
+  const scriptModeRef = useRef(scriptMode);
+  useEffect(() => { scriptModeRef.current = scriptMode; }, [scriptMode]);
+
   // ── Timer + TTS Effect (fires on every callStatus change) ──────────────────
   useEffect(() => {
     let interval;
@@ -423,10 +531,10 @@ export const CallProvider = ({ children }) => {
         subtitleSysRef.current?.start(); // (Pass remoteStream here if available from WebRTC)
 
         let playbackText = '';
-        if (scriptMode === 'fixed') {
+        if (scriptModeRef.current === 'fixed') {
            playbackText = introScript.replace(/\[Customer Name\]/g, customerName);
         } else {
-           playbackText = voiceScript || buildAIGreeting(customerName);
+           playbackText = voiceScriptRef.current || buildAIGreeting(customerName);
         }
 
         setTimeout(() => {
@@ -464,7 +572,7 @@ export const CallProvider = ({ children }) => {
               setCurrentSubtitle('');
               
               // Auto-disconnect if it was a robotic dialer call and human hasn't intervened
-              if (autoDialerActive && !agentHandedOff) {
+              if (autoDialerActiveRef.current && !agentHandedOffRef.current) {
                 setTimeout(() => { if (callStatus === 'Connected') endCall(); }, 2000);
               }
           };
@@ -545,8 +653,7 @@ export const CallProvider = ({ children }) => {
     }
 
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callStatus]);
+  }, [callStatus, endCall]);
 
   // ── Live Transcript Engine (Replaced by LiveSubtitleSystem) ────────
 
@@ -567,11 +674,10 @@ export const CallProvider = ({ children }) => {
       }, 3000);
     }
     return () => clearTimeout(timeout);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoDialerActive, callStatus, autoDialerList, callsMadeHour, callsMadeDay, scheduleLimits]);
+  }, [autoDialerActive, callStatus, autoDialerList, callsMadeHour, callsMadeDay, scheduleLimits, makeCall]);
 
   // ── makeCall ───────────────────────────────────────────────────────────────
-  const makeCall = useCallback((phoneNumber) => {
+  const makeCall = useCallback(async (phoneNumber) => {
     if (!phoneNumber) return;
 
     // Unlock voice synthesis modules on human interaction
@@ -625,30 +731,20 @@ export const CallProvider = ({ children }) => {
     callTimersRef.current.forEach(clearTimeout);
     callTimersRef.current = [];
 
-    // Simulate SIP signalling: Calling → Ringing → Connected
-    callTimersRef.current.push(setTimeout(() => {
-      setSipLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 })}] <- 100 Trying`]);
-      setSipLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 })}] <- 180 Ringing`]);
-      setCallStatus('Ringing');
-    }, 1000));
-    callTimersRef.current.push(setTimeout(() => {
-      setSipLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 })}] <- 200 OK`]);
-      callAnswerRef.current = new Date().toISOString();
-      setCallStatus('Connected');
-    }, 2500));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setCallStatus('Calling');
+    await sipCall(phoneNumber);
+    callAnswerRef.current = new Date().toISOString();
+    setCallStatus('Connected');
+  }, [sipCall, vosConfig]);
 
   // ── endCall ────────────────────────────────────────────────────────────────
-  const endCall = useCallback(() => {
+  const endCall = useCallback(async () => {
     callTimersRef.current.forEach(clearTimeout);
     callTimersRef.current = [];
     window.speechSynthesis.cancel();
     aiUtteranceRef.current = null;
 
-    setSipLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 })}] -> BYE sip:vos.gateway:5060 SIP/2.0`]);
-    setTimeout(() => {
-        setSipLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString([], { hour12: false, fractionalSecondDigits: 3 })}] <- 200 OK`]);
-    }, 150);
+    await sipHangup();
 
     setCallStatus('Ended');
     const t = setTimeout(() => {
@@ -657,7 +753,7 @@ export const CallProvider = ({ children }) => {
       setActiveSIPCall('');
     }, 800);
     callTimersRef.current.push(t);
-  }, []);
+  }, [sipHangup]);
 
   // ── simulateInboundCall ────────────────────────────────────────────────────
   const simulateInboundCall = useCallback(() => {
@@ -696,7 +792,6 @@ export const CallProvider = ({ children }) => {
         return prev;
       });
     }, 30000);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inboundCall, customerLeads]);
 
   // ── acceptInboundCall ──────────────────────────────────────────────────────
@@ -750,7 +845,6 @@ export const CallProvider = ({ children }) => {
       },
       callHistory,
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inboundCall, customerLeads, sessionLogs, agentAuth]);
 
   // ── rejectInboundCall ──────────────────────────────────────────────────────
@@ -880,14 +974,37 @@ export const CallProvider = ({ children }) => {
     }, ...prev]);
 
     // ── Professional session log ───────────────────────────────────────────────
+    const logRecord = buildLogRecord({ code, lead, phone, endTime, talkDuration, ringDuration, whatsappSent: wasSent, transcriptSnap });
     setSessionLogs(prev => [...prev, {
-      ...buildLogRecord({ code, lead, phone, endTime, talkDuration, ringDuration, whatsappSent: wasSent, transcriptSnap }),
+      ...logRecord,
       // Keep legacy short keys for the UI table backward compat
       time:        endTime,
       duration:    callDuration,
       lead:        lead?.name || 'Unknown',
       transcriptSnap,  // stored for recording voice playback
     }]);
+
+    // ── SQLite Persistence ─────────────────────────────────────────────────────
+    fetch('/api/calls', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(logRecord)
+    }).catch(console.error);
+
+    fetch('/api/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: lead?.name || 'Unknown',
+        phone,
+        disposition: code,
+        time: endTime,
+        duration: callDuration,
+        sentiment: sentimentScore,
+        recordingId: activeRecordingId,
+        whatsappSent: (code === 'SALE' || code === 'CBHOLD')
+      })
+    }).catch(console.error);
 
     // ── WhatsApp receipt ───────────────────────────────────────────────────────
     if ((code === 'SALE' || code === 'CBHOLD') && phone) {
@@ -900,7 +1017,14 @@ export const CallProvider = ({ children }) => {
   // ── Misc Helpers ───────────────────────────────────────────────────────────
   const clearTranscript     = () => { setTranscriptLines([]); setSentimentScore('neutral'); };
   const toggleAgentStatus   = () => setAgentAuth(prev => ({ ...prev, status: prev.status === 'PAUSED' ? 'READY' : 'PAUSED' }));
-  const handleMute          = () => setIsMuting(m => !m);
+  const handleMute = () => {
+    setIsMuting(m => {
+      const nextMute = !m;
+      if (nextMute) sipMute();
+      else sipUnmute();
+      return nextMute;
+    });
+  };
 
   // ── Context Value ──────────────────────────────────────────────────────────
   const value = {

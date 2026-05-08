@@ -119,17 +119,34 @@ export const buildReceiptMessage = (leadData, code, recordingId = '') => {
  * @param {string} code        - Disposition code
  * @param {string} recordingId - Optional recording reference for SALE receipts
  */
-export const sendWhatsAppReceipt = (leadData, code, recordingId = '') => {
+export const sendWhatsAppReceipt = async (leadData, code, recordingId = '') => {
   if (!leadData?.phone) {
     console.error('[WhatsApp] sendWhatsAppReceipt: no phone number on lead data.', leadData);
     return;
   }
 
-  const cleanPhone = String(leadData.phone).replace(/\D/g, '');
-  const message    = buildReceiptMessage(leadData, code, recordingId);
-  const url        = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`;
-
-  window.open(url, '_blank', 'noopener,noreferrer');
+  try {
+    const res = await fetch('/api/whatsapp/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: leadData.phone,
+        customerName: leadData.name || 'Valued Customer',
+        disposition: code,
+        recordingId: recordingId || 'N/A',
+        agentName: 'Our Team', // Using fallback since not exposed via CallContext directly
+      })
+    });
+    
+    const data = await res.json();
+    if (!data.ok) {
+      console.error('[WhatsApp] Send failed:', data.error);
+    } else {
+      console.log('[WhatsApp] Send success. Message ID:', data.messageId);
+    }
+  } catch (err) {
+    console.error('[WhatsApp] Network error:', err);
+  }
 };
 
 /**

@@ -1,24 +1,21 @@
 import { useRef, useState, useEffect } from 'react';
 import { Web } from 'sip.js';
-import { useAppStore } from '../store/useAppStore';
 
-export function useWebRTC(extension, password) {
+export function useWebRTC(extension, password, serverIp, wssPort, onHangup) {
   const [status, setStatus] = useState('DISCONNECTED');
   const userRef = useRef(null);
   const audioRef = useRef(null);
-  
-  const endActiveCall = useAppStore(state => state.endActiveCall);
 
   useEffect(() => {
     // We create the audio element once and keep it alive
-    audioRef.current = new Audio();
+    audioRef.current = document.getElementById('remoteAudio') || new Audio();
     audioRef.current.autoplay = true;
 
-    if (!extension || !password) return;
+    if (!extension || !password || !serverIp || !wssPort) return;
 
     setStatus('CONNECTING');
-    const uri = 'wss://dialer.yourdomain.com:8089/ws';
-    const domain = 'dialer.yourdomain.com';
+    const uri = `wss://${serverIp}:${wssPort}/ws`;
+    const domain = serverIp;
     const aor = `sip:${extension}@${domain}`;
 
     const simpleUser = new Web.SimpleUser(uri, {
@@ -42,7 +39,7 @@ export function useWebRTC(extension, password) {
       onCallHangup: () => {
         console.log("[SIP] Call Hangup");
         setStatus('REGISTERED');
-        endActiveCall();
+        if (onHangup) onHangup();
       },
       onRegistered: () => {
         console.log("[SIP] WSS Registered");
@@ -68,12 +65,12 @@ export function useWebRTC(extension, password) {
         userRef.current.unregister().then(() => userRef.current.disconnect());
       }
     };
-  }, [extension, password, endActiveCall]);
+  }, [extension, password, serverIp, wssPort, onHangup]);
 
   const call = async (targetNumber) => {
     if (!userRef.current) return;
     try {
-      await userRef.current.call(`sip:${targetNumber}@dialer.yourdomain.com`);
+      await userRef.current.call(`sip:${targetNumber}@${serverIp}`);
     } catch(e) {
       console.error("Call failed", e);
     }
@@ -96,7 +93,7 @@ export function useWebRTC(extension, password) {
   const transfer = async (targetAor) => {
      if (userRef.current?.session) {
        try {
-          await userRef.current.session.refer(`sip:${targetAor}@dialer.yourdomain.com`);
+          await userRef.current.session.refer(`sip:${targetAor}@${serverIp}`);
        } catch (e) {
          console.error("Transfer failed", e);
        }
