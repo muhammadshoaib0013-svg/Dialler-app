@@ -46,7 +46,9 @@ export default function AutoVoicePanel() {
   const {
     autoDialerList, setAutoDialerList,
     autoDialerActive, setAutoDialerActive,
-    scheduleLimits, setScheduleLimits,
+    diallerMode, setDiallerMode,
+    activeCampaign, setActiveCampaign,
+    dialCountdown,
     callsMadeDay,
     voiceScript, setVoiceScript,
     scriptMode, setScriptMode,
@@ -66,30 +68,51 @@ export default function AutoVoicePanel() {
   const [isPlaying,      setIsPlaying]      = useState(false);
   const [activeWord,     setActiveWord]     = useState(-1);
   const [playingText,    setPlayingText]    = useState('');
+  const [campaigns,      setCampaigns]      = useState([]);
 
   // ── Check proxy health on mount ───────────────────────────────────────────
   useEffect(() => {
     checkProxyHealth().then(ok => setProxyOnline(ok));
     fetchEdgeVoices().then(v => setVoices(v));
+    fetch('/api/campaigns', { headers: { 'Authorization': `Bearer ${window.__authToken || ''}` } })
+      .then(r => r.json())
+      .then(d => {
+        if(d.data) {
+          setCampaigns(d.data);
+          if (d.data.length > 0 && !activeCampaign) setActiveCampaign(d.data[0].id);
+        }
+      }).catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onDrop = useCallback((acceptedFiles) => {
     const file = acceptedFiles[0];
-    if (file) {
+    if (file && activeCampaign) {
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-        complete: (results) => {
+        complete: async (results) => {
           const numbers = results.data
             .map(row => row.phone || row.Phone || row.number || row.Number || Object.values(row)[0])
             .filter(n => n && String(n).trim() !== '');
+          
+          try {
+            await fetch(`/api/campaigns/${activeCampaign}/leads`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.__authToken || ''}` },
+              body: JSON.stringify({ leads: numbers })
+            });
+          } catch(e) { console.error(e); }
+
           setAutoDialerList(prev => [...prev, ...numbers]);
           setTotalListLength(prev => prev + numbers.length);
         }
       });
+    } else if (!activeCampaign) {
+      alert("Please select a campaign first.");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeCampaign]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -151,24 +174,41 @@ export default function AutoVoicePanel() {
         </button>
       </div>
 
-      {/* ── Settings Panel ── */}
-      {isSettingsOpen && (
-        <div className="bg-slate-900/80 border border-slate-700 p-4 rounded-xl mb-4 text-sm shadow-inner shrink-0">
-          <div className="grid grid-cols-2 gap-4 mb-3">
-            <div>
-              <label className="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Max Calls/Hour</label>
-              <input type="number" value={scheduleLimits.maxPerHour}
-                onChange={e => setScheduleLimits({ ...scheduleLimits, maxPerHour: parseInt(e.target.value, 10) || 0 })}
-                className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg px-3 py-2 outline-none focus:border-purple-500/50 text-sm" />
-            </div>
-            <div>
-              <label className="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Max Calls/Day</label>
-              <input type="number" value={scheduleLimits.maxPerDay}
-                onChange={e => setScheduleLimits({ ...scheduleLimits, maxPerDay: parseInt(e.target.value, 10) || 0 })}
-                className="w-full bg-slate-950 border border-slate-800 text-white rounded-lg px-3 py-2 outline-none focus:border-purple-500/50 text-sm" />
+      {/* ── Dialer Mode & Campaign ── */}
+      <div className="mb-4 bg-slate-900/40 border border-slate-800/80 rounded-xl p-3 shrink-0">
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-between items-center">
+            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Campaign</label>
+            <select value={activeCampaign} onChange={e => setActiveCampaign(e.target.value)}
+              className="bg-slate-950 border border-slate-800 text-white rounded px-2 py-1 outline-none text-xs w-1/2 cursor-pointer">
+              <option value="" disabled>Select Campaign...</option>
+              {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Mode</label>
+            <div className="flex rounded bg-slate-950 border border-slate-800 overflow-hidden">
+              {['PREVIEW', 'PROGRESSIVE', 'POWER'].map(m => (
+                <button key={m} onClick={() => setDiallerMode(m)}
+                  className={`px-2 py-1 text-[9px] font-bold tracking-wider ${diallerMode === m ? 'bg-purple-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>
+                  {m}
+                </button>
+              ))}
             </div>
           </div>
 
+          {(dialCountdown !== null) && (
+            <div className="text-[10px] font-bold text-amber-400 uppercase tracking-widest text-center mt-1 bg-amber-500/10 py-1 rounded">
+              {typeof dialCountdown === 'string' ? dialCountdown : `Next call in: ${dialCountdown}s`}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Settings Panel ── */}
+      {isSettingsOpen && (
+        <div className="bg-slate-900/80 border border-slate-700 p-4 rounded-xl mb-4 text-sm shadow-inner shrink-0">
           {/* Voice Selector */}
           <div>
             <label className="block text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Neural Voice</label>

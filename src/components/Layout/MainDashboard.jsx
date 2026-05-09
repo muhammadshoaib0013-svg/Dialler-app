@@ -11,6 +11,7 @@ import NayatelCockpit from '../Views/NayatelCockpit';
 import InboundCenter from '../Views/InboundCenter';
 import LeadsView from '../Views/LeadsView';
 import InternalReports from '../Views/InternalReports';
+import AnalyticsDashboard from '../Views/AnalyticsDashboard';
 import RecordingsLibrary from '../Views/RecordingsLibrary';
 import AdvancedReporting from '../Views/AdvancedReporting';
 import AdminPanel from '../Admin/AdminPanel';
@@ -29,7 +30,7 @@ export default function MainDashboard() {
       case 'cockpit':    return <NayatelCockpit key="cockpit" />;
       case 'omnichannel':return <InboundCenter key="omnichannel" />;
       case 'leadvault':  return <LeadsView key="leadvault" />;
-      case 'analytics':  return <InternalReports key="analytics" />;
+      case 'analytics':  return <AnalyticsDashboard key="analytics" />;
       case 'reporting':  return <AdvancedReporting key="reporting" />;
       case 'vault':      return <RecordingsLibrary key="vault" />;
       case 'admin':      return <AdminPanel key="admin" />;
@@ -42,7 +43,7 @@ export default function MainDashboard() {
       <NavigationSidebar activeTab={activeTab} setActiveTab={setActiveTab} className="sticky top-0 h-screen shrink-0" />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      <div className="flex-1 flex flex-col min-w-0 relative md:pt-0 pt-14">
         {/* Background Glow */}
         <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-cyan-900/20 rounded-full blur-[120px] pointer-events-none" />
 

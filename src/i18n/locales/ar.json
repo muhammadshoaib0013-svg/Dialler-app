@@ -1,0 +1,18 @@
+{
+  "nav.dashboard": "لوحة القيادة",
+  "nav.dialler": "طالب",
+  "nav.leads": "العملاء المحتملين",
+  "nav.analytics": "تحليلات",
+  "nav.admin": "مسؤول",
+  "call.idle": "جاهز للاتصال",
+  "call.calling": "يتصل...",
+  "call.connected": "متصل",
+  "call.ended": "انتهت المكالمة",
+  "disp.sale": "اكتمل البيع",
+  "disp.cbhold": "إعادة الاتصال",
+  "disp.ni": "غير مهتم",
+  "disp.dnc": "لا تتصل",
+  "auth.login": "تسجيل الدخول",
+  "auth.username": "معرف الوكيل",
+  "auth.password": "كلمة المرور"
+}

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useCallContext } from '../../context/CallContext';
+import { useTheme } from '../../context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 import { LogIn } from 'lucide-react';
 
 export default function LoginForm() {
@@ -7,6 +9,8 @@ export default function LoginForm() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { loginAgent } = useCallContext();
+  const { companyName, theme } = useTheme();
+  const { t } = useTranslation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -26,21 +30,21 @@ export default function LoginForm() {
     <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">
       <div className="glass-panel p-8 w-full max-w-md shadow-xl border border-slate-800">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gold-500 mb-2 font-sans tracking-wide">Vicidial Connect</h1>
-          <p className="text-slate-400">Agent Workspace Login</p>
+          <h1 className="text-3xl font-bold text-gold-500 mb-2 font-sans tracking-wide" style={{ color: 'var(--brand-gold)' }}>{companyName}</h1>
+          <p className="text-slate-400">{theme?.welcome_message || 'Agent Workspace Login'}</p>
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && <div className="p-3 bg-red-900/40 border border-red-500 text-red-200 rounded text-sm">{error}</div>}
           
           <div>
-            <label className="block text-sm text-slate-300 mb-1 tracking-wide">Username</label>
+            <label className="block text-sm text-slate-300 mb-1 tracking-wide">{t('auth.username')}</label>
             <input required type="text" className="input-field" 
               value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} 
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-300 mb-1 tracking-wide">Password</label>
+            <label className="block text-sm text-slate-300 mb-1 tracking-wide">{t('auth.password')}</label>
             <input required type="password" className="input-field" 
               value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} 
             />
@@ -61,7 +65,7 @@ export default function LoginForm() {
           </div>
           
           <button type="submit" disabled={loading} className="btn-gold w-full mt-6 flex justify-center items-center gap-2 shadow-lg shadow-gold-500/20">
-            {loading ? <span className="animate-pulse">Authenticating...</span> : <><LogIn size={18} /> Login Session</>}
+            {loading ? <span className="animate-pulse">Authenticating...</span> : <><LogIn size={18} /> {t('auth.login')}</>}
           </button>
         </form>
       </div>

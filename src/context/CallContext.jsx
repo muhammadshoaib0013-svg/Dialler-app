@@ -8,29 +8,18 @@ import { loadVosConfig, saveVosConfig } from '../components/Admin/ServerSetupMod
 // ─── Script Definitions (Migrated from ScriptPanel) ──────────────────────────────
 export const SCRIPT_TEMPLATES = [
   {
-    title: 'Introduction',
+    title: 'Smart TV Promotion',
     colorBar: 'from-blue-600 to-blue-500',
     badge: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    text: 'Assalam-o-Alaikum [Customer Name]! This is Hassan calling from HB Electronics. I saw you were browsing our Smart TV range online — do you have a quick minute to hear about an exclusive offer?',
-  },
-  {
-    title: 'Warranty & Delivery',
-    colorBar: 'from-purple-600 to-purple-500',
-    badge: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    text: '[Customer Name], all our appliances come with a standard 2-year manufacturer warranty and free next-day home delivery — fully registered and certified.',
-  },
-  {
-    title: 'Closing',
-    colorBar: 'from-green-600 to-green-500',
-    badge: 'bg-green-500/20 text-green-400 border-green-500/30',
-    text: 'Perfect, [Customer Name]! I\'ll lock in that exclusive price for you right now. Our delivery team will WhatsApp you the confirmation shortly. Have a wonderful day!',
-  },
-  {
-    title: 'Payment Confirmation',
-    colorBar: 'from-gold-500 to-amber-500',
-    badge: 'bg-gold-500/20 text-gold-400 border-gold-500/30',
-    text: 'Thank you, [Customer Name]! To confirm your order, we accept EasyPaisa, JazzCash, bank transfer, and cash on delivery. Which payment method would you prefer today?',
-  },
+    color: 'blue',
+    sections: {
+      opening:   { label: 'Opening', text: 'Assalam-o-Alaikum [Customer Name]! This is Hassan calling from HB Electronics. Do you have a quick minute?' },
+      pitch:     { label: 'Product Pitch', text: 'We have an exclusive offer on our Samsung 55" 4K Smart TV at 30% off — just PKR 89,999.' },
+      objection_handler: { label: 'Objection Handler', text: 'I understand price is a concern. We offer easy monthly installments and free next-day delivery with a 2-year warranty.' },
+      close:     { label: 'Trial Close', text: 'Perfect! I\'ll lock in that exclusive price for you. Which payment method do you prefer?' },
+      callback:  { label: 'Callback Setup', text: 'No problem at all! When would be a better time for me to call you back?' }
+    }
+  }
 ];
 
 // ─── Mock Customer Names Pool ──────────────────────────────────────────────────
@@ -203,6 +192,23 @@ export const CallProvider = ({ children }) => {
   const [sentimentScore, setSentimentScore]   = useState('neutral');
   // activeScriptSection: string | null — which Script Panel section is "live"
   const [activeScriptSection, setActiveScriptSection] = useState(null);
+  const [recommendedScriptSection, setRecommendedScriptSection] = useState(null);
+  const [currentScriptSection, setCurrentScriptSection] = useState(null);
+
+  // Auto-recommend script section based on live sentiment
+  useEffect(() => {
+    if (callStatus === 'Connected') {
+      if (sentimentScore === 'negative' && callDuration > 30) {
+        setRecommendedScriptSection('objection_handler');
+      } else if (sentimentScore === 'positive' && callDuration > 60) {
+        setRecommendedScriptSection('close');
+      } else {
+        setRecommendedScriptSection(null);
+      }
+    } else {
+      setRecommendedScriptSection(null);
+    }
+  }, [sentimentScore, callDuration, callStatus]);
 
   // ── TTS (Auto-Dialer) ──────────────────────────────────────────────────────
   const [voiceScript, setVoiceScript] = useState(
@@ -215,10 +221,14 @@ export const CallProvider = ({ children }) => {
   // ── Auto-Dialer ────────────────────────────────────────────────────────────
   const [autoDialerList, setAutoDialerList]   = useState([]);
   const [autoDialerActive, setAutoDialerActive] = useState(false);
-  const [scheduleLimits, setScheduleLimits]   = useState({ maxPerHour: 50, maxPerDay: 500 });
   const [callsMadeHour, setCallsMadeHour]     = useState(0);
   const [callsMadeDay, setCallsMadeDay]       = useState(0);
   const [totalListLength, setTotalListLength] = useState(0);
+  const [diallerMode, setDiallerMode]         = useState('PROGRESSIVE'); // PREVIEW, PROGRESSIVE, POWER
+  const [activeCampaign, setActiveCampaign]   = useState('');
+  const [dialCountdown, setDialCountdown]     = useState(null);
+  const diallerPaceRef = useRef(3000);
+  const recentDurationsRef = useRef([]);
 
   // ── Internal Refs ──────────────────────────────────────────────────────────
   const callTimersRef = useRef([]);
@@ -253,20 +263,7 @@ export const CallProvider = ({ children }) => {
    * Set to `true` when DispositionGrid calls disposeAndLog().
    * When `true`, the auto-log fallback in the Idle useEffect is skipped.
    */
-  const userAgentRef  = useRef({ 
-    // SIP WebRTC stub - low latency logic for VOS3000 WebRTC-to-SIP Proxy Handshake
-    current: {
-      configuration: {
-        rtcpMuxPolicy: 'require',     // Required for strict NAT traversal optimization
-        bundlePolicy: 'max-bundle',   // Maximizes stream multiplexing to reduce port usage
-        iceTransportPolicy: 'all',
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' }
-          // Configure your TURN server credentials here for a resilient WebRTC-to-VOS bridge
-        ]
-      }
-    } 
-  });
+
 
   // ── VOS3000 Integration ────────────────────────────────────────────────────
   const [vosBalance, setVosBalance]           = useState(0.00);
@@ -298,12 +295,14 @@ export const CallProvider = ({ children }) => {
     if (!cfg) setIsServerSetupOpen(true);
   }, []);
 
+  const remoteAudioRef = useRef(null);
+
   const { status: sipStatus, call: sipCall, hangup: sipHangup, mute: sipMute, unmute: sipUnmute } = useWebRTC(
-    vosConfig.extension,
-    vosConfig.password,
-    vosConfig.serverIp,
-    vosConfig.wssPort,
-    () => setCallStatus('Idle')
+    vosConfig?.extension,
+    vosConfig?.password,
+    vosConfig?.serverIp,
+    vosConfig?.wssPort,
+    () => { setCallStatus('Idle'); setActiveSIPCall(null); }
   );
 
   // Real Ping Gateway
@@ -377,8 +376,8 @@ export const CallProvider = ({ children }) => {
       
       try {
         const [logsRes, leadsRes] = await Promise.all([
-          fetch(`/api/calls?agentId=${encodeURIComponent(data.username)}&limit=100`),
-          fetch('/api/leads?limit=200')
+          fetch(`/api/calls?agentId=${encodeURIComponent(data.username)}&limit=100`, { headers: { 'Authorization': `Bearer ${window.__authToken}` } }),
+          fetch('/api/leads?limit=200', { headers: { 'Authorization': `Bearer ${window.__authToken}` } })
         ]);
         if (logsRes.ok) {
           const logs = await logsRes.json();
@@ -411,7 +410,8 @@ export const CallProvider = ({ children }) => {
         }
         if (leadsRes.ok) {
           const leads = await leadsRes.json();
-          setCustomerLeads(leads.map(lead => ({
+          const data = leads.data || leads;
+          setCustomerLeads(data.map(lead => ({
             id: lead.id,
             name: lead.name,
             phone: lead.phone,
@@ -612,6 +612,17 @@ export const CallProvider = ({ children }) => {
       aiUtteranceRef.current = null;
 
       if (callStatus === 'Idle') {
+        // Pacing logic
+        if (callDuration > 0) {
+          recentDurationsRef.current.push(callDuration);
+          if (recentDurationsRef.current.length > 5) recentDurationsRef.current.shift();
+          if (recentDurationsRef.current.length === 5) {
+            const avg = recentDurationsRef.current.reduce((a,b)=>a+b, 0) / 5;
+            if (avg > 120) diallerPaceRef.current = Math.min(diallerPaceRef.current + 15000, 60000);
+            else if (avg < 45) diallerPaceRef.current = Math.min(diallerPaceRef.current + 30000, 60000);
+          }
+        }
+
         // Only auto-log if user hung up WITHOUT clicking a disposition
         if (callDuration > 0 && !disposedRef.current) {
           const endTime = new Date().toISOString();
@@ -660,21 +671,54 @@ export const CallProvider = ({ children }) => {
   // ── Auto-Dialer Loop ───────────────────────────────────────────────────────
   useEffect(() => {
     let timeout;
-    if (autoDialerActive && callStatus === 'Idle' && autoDialerList.length > 0) {
-      if (callsMadeHour >= scheduleLimits.maxPerHour || callsMadeDay >= scheduleLimits.maxPerDay) {
-        setAutoDialerActive(false);
-        return;
-      }
-      timeout = setTimeout(() => {
+    let countdownInterval;
+
+    const attemptDial = async () => {
+      if (!autoDialerActive || callStatus !== 'Idle' || autoDialerList.length === 0) return;
+
+      try {
+        const res = await fetch(`/api/dialler/can-dial?agentId=${encodeURIComponent(agentAuth.username)}`, {
+          headers: { 'Authorization': `Bearer ${window.__authToken || ''}` }
+        });
+        const data = await res.json();
+        
+        if (!data.canDial) {
+           setDialCountdown('LIMIT REACHED');
+           setAutoDialerActive(false);
+           return;
+        }
+
+        setCallsMadeHour(data.callsThisHour);
+        setCallsMadeDay(data.callsToday);
+
         const next = autoDialerList[0];
-        setAutoDialerList(prev => prev.slice(1));
-        setCallsMadeHour(prev => prev + 1);
-        setCallsMadeDay(prev => prev + 1);
-        makeCall(next?.phone || next);
-      }, 3000);
-    }
-    return () => clearTimeout(timeout);
-  }, [autoDialerActive, callStatus, autoDialerList, callsMadeHour, callsMadeDay, scheduleLimits, makeCall]);
+        
+        let delay = diallerMode === 'PREVIEW' ? 5000 : diallerPaceRef.current;
+        if (diallerMode === 'POWER') delay = 0;
+        
+        setDialCountdown(Math.ceil(delay / 1000));
+        
+        countdownInterval = setInterval(() => {
+          setDialCountdown(prev => (typeof prev === 'number' && prev > 0 ? prev - 1 : prev));
+        }, 1000);
+
+        timeout = setTimeout(() => {
+          clearInterval(countdownInterval);
+          setDialCountdown(null);
+          setAutoDialerList(prev => prev.slice(1));
+          makeCall(next?.phone || next);
+        }, delay);
+
+      } catch (err) {
+        console.error(err);
+        setAutoDialerActive(false);
+      }
+    };
+
+    attemptDial();
+
+    return () => { clearTimeout(timeout); clearInterval(countdownInterval); };
+  }, [autoDialerActive, callStatus, autoDialerList, agentAuth.username, diallerMode, makeCall]);
 
   // ── makeCall ───────────────────────────────────────────────────────────────
   const makeCall = useCallback(async (phoneNumber) => {
@@ -707,6 +751,7 @@ export const CallProvider = ({ children }) => {
       address:  '742 Evergreen Terrace',
       city:     'Springfield',
       state:    'IL',
+      campaign: activeCampaign || 'Default'
     };
 
     // ── Populate stable refs BEFORE any setState ────────────────────────────
@@ -732,10 +777,16 @@ export const CallProvider = ({ children }) => {
     callTimersRef.current = [];
 
     setCallStatus('Calling');
-    await sipCall(phoneNumber);
-    callAnswerRef.current = new Date().toISOString();
-    setCallStatus('Connected');
-  }, [sipCall, vosConfig]);
+    setActiveSIPCall(phoneNumber);
+    try {
+      await sipCall(phoneNumber);
+      callAnswerRef.current = new Date().toISOString();
+      setCallStatus('Connected');
+    } catch(e) {
+      setCallStatus('Idle');
+      setActiveSIPCall(null);
+    }
+  }, [sipCall, vosConfig, activeCampaign]);
 
   // ── endCall ────────────────────────────────────────────────────────────────
   const endCall = useCallback(async () => {
@@ -747,12 +798,11 @@ export const CallProvider = ({ children }) => {
     await sipHangup();
 
     setCallStatus('Ended');
-    const t = setTimeout(() => {
+    setTimeout(() => {
       setCallStatus('Idle');
       setCurrentLeadData(null);
       setActiveSIPCall('');
     }, 800);
-    callTimersRef.current.push(t);
   }, [sipHangup]);
 
   // ── simulateInboundCall ────────────────────────────────────────────────────
@@ -912,7 +962,7 @@ export const CallProvider = ({ children }) => {
     // ── Agent ────────────────────────────────────────────────────────────────
     agentId:          agentAuth.agentId  || agentAuth.extension || 'N/A',
     agentName:        agentAuth.username    || 'N/A',
-    campaign:         agentAuth.campaign    || 'Manual Outbound',
+    campaign:         activeCampaign || agentAuth.campaign || 'Manual Outbound',
     callDirection:    'Outbound',
     // ── Lead / Customer ──────────────────────────────────────────────────────
     leadId:           lead?.id   || 'N/A',
@@ -959,9 +1009,11 @@ export const CallProvider = ({ children }) => {
     const talkDuration  = Math.max(0, callDuration - ringDuration);
     const transcriptSnap = transcriptRef.current;
 
+    const tempId = Date.now();
+
     // ── Rich CRM record ───────────────────────────────────────────────────────
     setCustomerLeads(prev => [{
-      id:             Date.now(),
+      id:             tempId,
       name:           lead?.name  || 'Unknown',
       phone,
       disposition:    code,
@@ -977,34 +1029,59 @@ export const CallProvider = ({ children }) => {
     const logRecord = buildLogRecord({ code, lead, phone, endTime, talkDuration, ringDuration, whatsappSent: wasSent, transcriptSnap });
     setSessionLogs(prev => [...prev, {
       ...logRecord,
-      // Keep legacy short keys for the UI table backward compat
+      id:          tempId,
       time:        endTime,
       duration:    callDuration,
       lead:        lead?.name || 'Unknown',
       transcriptSnap,  // stored for recording voice playback
     }]);
 
-    // ── SQLite Persistence ─────────────────────────────────────────────────────
-    fetch('/api/calls', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(logRecord)
-    }).catch(console.error);
+    // ── Async AI Summary & DB Persistence ──────────────────────────────────────
+    (async () => {
+      let aiSummaryStr = '';
+      let leadScoreVal = 0;
+      let nextActionStr = '';
 
-    fetch('/api/leads', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: lead?.name || 'Unknown',
-        phone,
-        disposition: code,
-        time: endTime,
-        duration: callDuration,
-        sentiment: sentimentScore,
-        recordingId: activeRecordingId,
-        whatsappSent: (code === 'SALE' || code === 'CBHOLD')
-      })
-    }).catch(console.error);
+      if (transcriptSnap && transcriptSnap.length > 0) {
+        try {
+          const aiRes = await fetch('/api/ai/summarize', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.__authToken || ''}` },
+             body: JSON.stringify({ 
+                transcript: transcriptSnap.map(l => `[${l.role.toUpperCase()}] ${l.text}`).join('\\n'), 
+                disposition: code, 
+                duration: callDuration, 
+                customerName: lead?.name || 'Unknown' 
+             })
+          });
+          const aiData = await aiRes.json();
+          if (aiData && aiData.summary) {
+             aiSummaryStr = JSON.stringify(aiData);
+             leadScoreVal = aiData.leadScore || 0;
+             nextActionStr = aiData.nextAction || '';
+             
+             // Update local states immediately
+             setSessionLogs(prev => prev.map(l => l.id === tempId ? { ...l, ai_summary: aiSummaryStr, lead_score: leadScoreVal, next_action: nextActionStr } : l));
+             setCustomerLeads(prev => prev.map(l => l.id === tempId ? { ...l, lead_score: leadScoreVal, ai_summary: aiSummaryStr, next_action: nextActionStr } : l));
+          }
+        } catch(e) { console.error('AI Summary failed', e); }
+      }
+
+      fetch('/api/calls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.__authToken || ''}` },
+        body: JSON.stringify({ ...logRecord, aiSummary: aiSummaryStr })
+      }).catch(console.error);
+
+      fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window.__authToken || ''}` },
+        body: JSON.stringify({
+          name: lead?.name || 'Unknown', phone, disposition: code, time: endTime, duration: callDuration, sentiment: sentimentScore, recordingId: activeRecordingId, whatsappSent: (code === 'SALE' || code === 'CBHOLD'),
+          leadScore: leadScoreVal
+        })
+      }).catch(console.error);
+    })();
 
     // ── WhatsApp receipt ───────────────────────────────────────────────────────
     if ((code === 'SALE' || code === 'CBHOLD') && phone) {
@@ -1031,7 +1108,7 @@ export const CallProvider = ({ children }) => {
     // Auth
     agentAuth, isAuthenticated, loginAgent, toggleAgentStatus,
     // SIP
-    isRegistered, userAgentRef,
+    isRegistered,
     // Outbound Call
     callStatus, setCallStatus,
     activeSIPCall,
@@ -1048,7 +1125,8 @@ export const CallProvider = ({ children }) => {
     sessionLogs, setSessionLogs,
     // Intelligence Layer
     transcriptLines, sentimentScore, clearTranscript,
-    activeScriptSection,
+    activeScriptSection, recommendedScriptSection, setRecommendedScriptSection,
+    currentScriptSection, setCurrentScriptSection,
     // TTS
     voiceScript, setVoiceScript,
     scriptMode, setScriptMode,
@@ -1061,7 +1139,9 @@ export const CallProvider = ({ children }) => {
     // Auto-Dialer
     autoDialerList,   setAutoDialerList,
     autoDialerActive, setAutoDialerActive,
-    scheduleLimits,   setScheduleLimits,
+    diallerMode, setDiallerMode,
+    activeCampaign, setActiveCampaign,
+    dialCountdown,
     callsMadeHour, callsMadeDay,
     totalListLength, setTotalListLength,
     // ── Inbound System ──────────────────────────────────────────────────────

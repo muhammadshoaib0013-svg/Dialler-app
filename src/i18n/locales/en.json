@@ -1,0 +1,18 @@
+{
+  "nav.dashboard": "Dashboard",
+  "nav.dialler": "Dialler",
+  "nav.leads": "Customer Leads",
+  "nav.analytics": "Analytics",
+  "nav.admin": "Admin",
+  "call.idle": "Ready to dial",
+  "call.calling": "Calling...",
+  "call.connected": "Connected",
+  "call.ended": "Call ended",
+  "disp.sale": "Completed Sale",
+  "disp.cbhold": "Call Back",
+  "disp.ni": "Not Interested",
+  "disp.dnc": "Do Not Call",
+  "auth.login": "Sign In",
+  "auth.username": "Agent ID",
+  "auth.password": "Password"
+}

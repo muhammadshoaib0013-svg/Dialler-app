@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Users, Phone, Filter, TrendingUp, Target, Clock, Ban, PhoneOff, MessageCircle, CheckCircle2, Search } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Users, Phone, Filter, TrendingUp, Target, Clock, Ban, PhoneOff, MessageCircle, CheckCircle2, Search, Send, MessageSquare } from 'lucide-react';
 import { useCallContext } from '../../context/CallContext';
 import Papa from 'papaparse';
 
@@ -21,11 +21,12 @@ const SENTIMENT_META = {
 };
 
 const FILTER_TABS = [
-  { key: 'All',    label: 'All' },
-  { key: 'SALE',   label: '🎯 Sales' },
-  { key: 'CBHOLD', label: '🔁 Callbacks' },
-  { key: 'DNC',    label: '🚫 DNC' },
-  { key: 'NI',     label: '👎 Not Int.' },
+  { key: 'All',          label: 'All' },
+  { key: 'HighPriority', label: '🔥 High Priority' },
+  { key: 'SALE',         label: '🎯 Sales' },
+  { key: 'CBHOLD',       label: '🔁 Callbacks' },
+  { key: 'DNC',          label: '🚫 DNC' },
+  { key: 'NI',           label: '👎 Not Int.' },
 ];
 
 // ─── Stat Chip ─────────────────────────────────────────────────────────────────
@@ -54,18 +55,76 @@ function EmptyState() {
   );
 }
 
+// ─── WhatsApp Chat ─────────────────────────────────────────────────────────────
+function WhatsAppChat({ phone }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let interval;
+    const fetchMsgs = () => {
+      fetch(`/api/whatsapp/messages?phone=${phone}`, { headers: { 'Authorization': 'Bearer placeholder' } })
+        .then(r => r.json())
+        .then(d => { if (d.ok) setMessages(d.data); setLoading(false); })
+        .catch(() => setLoading(false));
+    };
+    fetchMsgs();
+    interval = setInterval(fetchMsgs, 5000);
+    return () => clearInterval(interval);
+  }, [phone]);
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+    fetch('/api/whatsapp/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer placeholder' },
+      body: JSON.stringify({ phone, text: input })
+    }).then(() => {
+      setMessages([...messages, { id: Date.now(), direction: 'out', text: input, ts: Date.now().toString() }]);
+      setInput('');
+    });
+  };
+
+  return (
+    <div className="flex flex-col h-64 bg-slate-900 border border-slate-700/60 rounded-xl overflow-hidden mt-4">
+      <div className="bg-slate-800 px-4 py-2 border-b border-slate-700/60 flex items-center gap-2">
+        <MessageSquare size={14} className="text-emerald-400" />
+        <span className="text-xs font-bold text-slate-200">WhatsApp: {phone}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar flex flex-col">
+        {loading ? <div className="text-xs text-slate-500 m-auto">Loading...</div> : messages.length === 0 ? <div className="text-xs text-slate-500 m-auto text-center italic">No messages yet.<br/>Start a conversation!</div> : (
+          messages.map(m => (
+            <div key={m.id} className={`max-w-[80%] rounded-lg px-3 py-2 text-xs ${m.direction === 'in' ? 'bg-slate-800 text-slate-200 self-start border border-slate-700' : 'bg-emerald-600/20 text-emerald-100 self-end border border-emerald-500/30'}`}>
+              {m.text}
+            </div>
+          ))
+        )}
+      </div>
+      <div className="p-2 bg-slate-950/50 border-t border-slate-700/60 flex items-center gap-2">
+        <input type="text" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter' && handleSend()} placeholder="Type message..." className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500/50" />
+        <button onClick={handleSend} className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"><Send size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function CustomerLeadsPanel() {
   const { customerLeads, callStatus, makeCall } = useCallContext();
   const [activeFilter, setActiveFilter]         = useState('All');
   const [searchQuery, setSearchQuery]           = useState('');
   const [hoveredRow, setHoveredRow]             = useState(null);
+  const [expandedRow, setExpandedRow]           = useState(null);
+  const [sortByScore, setSortByScore]           = useState(false);
 
   // Filter and format leads based on both tab and search query
   const filtered = useMemo(() => {
-    return customerLeads.filter(lead => {
+    let result = customerLeads.filter(lead => {
        // Filter Tab
-       const passTab = activeFilter === 'All' ? true : lead.disposition === activeFilter;
+       const passTab = activeFilter === 'All' ? true 
+         : activeFilter === 'HighPriority' ? (lead.lead_score > 70 && lead.disposition !== 'SALE')
+         : lead.disposition === activeFilter;
        
        // Search Term (Phone or name or Disposition)
        const passSearch = searchQuery === '' || 
@@ -75,7 +134,12 @@ export default function CustomerLeadsPanel() {
 
        return passTab && passSearch;
     });
-  }, [customerLeads, activeFilter, searchQuery]);
+    
+    if (sortByScore) {
+       result = [...result].sort((a, b) => (b.lead_score || 0) - (a.lead_score || 0));
+    }
+    return result;
+  }, [customerLeads, activeFilter, searchQuery, sortByScore]);
 
   // Stats
   const salesCount = customerLeads.filter(l => l.disposition === 'SALE').length;
@@ -126,7 +190,9 @@ export default function CustomerLeadsPanel() {
            {FILTER_TABS.map(tab => {
              const count = tab.key === 'All'
                ? customerLeads.length
-               : customerLeads.filter(l => l.disposition === tab.key).length;
+               : tab.key === 'HighPriority' 
+                 ? customerLeads.filter(l => l.lead_score > 70 && l.disposition !== 'SALE').length
+                 : customerLeads.filter(l => l.disposition === tab.key).length;
              return (
                <button
                  key={tab.key}
@@ -141,6 +207,14 @@ export default function CustomerLeadsPanel() {
                </button>
              );
            })}
+           <button
+             onClick={() => setSortByScore(!sortByScore)}
+             className={`ml-2 px-3 py-1.5 rounded-full text-[11px] font-bold tracking-wide transition-all duration-200 border ${
+                sortByScore ? 'bg-purple-500/20 text-purple-400 border-purple-500/40' : 'text-slate-500 hover:text-slate-300 border-slate-700'
+             }`}
+           >
+             Sort by Score
+           </button>
         </div>
 
         {/* Search & Export */}
@@ -201,6 +275,7 @@ export default function CustomerLeadsPanel() {
               <tr>
                 <th className="px-5 py-3.5 border-b border-slate-800/60">Customer</th>
                 <th className="px-5 py-3.5 border-b border-slate-800/60">Phone</th>
+                <th className="px-5 py-3.5 border-b border-slate-800/60 text-center">Score</th>
                 <th className="px-5 py-3.5 border-b border-slate-800/60">Status</th>
                 <th className="px-5 py-3.5 border-b border-slate-800/60 text-center">Mood</th>
                 <th className="px-5 py-3.5 border-b border-slate-800/60 text-center">WhatsApp Sent</th>
@@ -217,103 +292,147 @@ export default function CustomerLeadsPanel() {
                 const secs  = (lead.duration || 0) % 60;
                 const isHovered = hoveredRow === idx;
 
-                return (
-                  <tr
-                    key={lead.id}
-                    onMouseEnter={() => setHoveredRow(idx)}
-                    onMouseLeave={() => setHoveredRow(null)}
-                    className="transition-colors border-b border-slate-800/30"
-                    style={{ background: isHovered ? 'rgba(30,41,59,0.5)' : 'transparent' }}
-                  >
-                    {/* Customer */}
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-gold-400 flex-shrink-0"
-                          style={{ background: 'rgba(212,175,55,0.1)', border: '1px solid rgba(212,175,55,0.2)' }}
+                  <React.Fragment key={lead.id}>
+                    <tr
+                      onMouseEnter={() => setHoveredRow(idx)}
+                      onMouseLeave={() => setHoveredRow(null)}
+                      onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
+                      className="transition-colors border-b border-slate-800/30 cursor-pointer"
+                      style={{ background: isHovered ? 'rgba(30,41,59,0.5)' : 'transparent' }}
+                    >
+                      {/* Customer */}
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-gold-400 flex-shrink-0"
+                            style={{ background: 'rgba(212,175,55,0.1)', border: '1px solid rgba(212,175,55,0.2)' }}
+                          >
+                            {(lead.name || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-slate-100 font-medium truncate max-w-[140px] leading-tight">{lead.name}</p>
+                            <p className="text-slate-500 text-[10px] uppercase font-mono mt-0.5">
+                              {new Date(lead.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Phone */}
+                      <td className="px-5 py-4 font-mono text-gold-400 font-bold tracking-wider text-sm">
+                        {lead.phone}
+                      </td>
+
+                      {/* Score */}
+                      <td className="px-5 py-4 text-center">
+                        <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full border text-[10px] font-bold ${
+                           (lead.lead_score || 0) < 40 ? 'text-red-400 border-red-500/30 bg-red-500/10' 
+                           : (lead.lead_score || 0) <= 70 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
+                           : 'text-green-400 border-green-500/30 bg-green-500/10'
+                        }`}>
+                          {lead.lead_score || 0}
+                        </div>
+                      </td>
+
+                      {/* Disposition */}
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-widest border ${dispo.cls}`}>
+                          {dispo.icon}
+                          {dispo.label}
+                        </span>
+                      </td>
+
+                      {/* Sentiment */}
+                      <td className="px-5 py-4 text-center">
+                        <span
+                          className={`text-xl ${sent.cls}`}
+                          title={sent.label}
+                          role="img"
+                          aria-label={sent.label}
                         >
-                          {(lead.name || '?').charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="text-slate-100 font-medium truncate max-w-[140px] leading-tight">{lead.name}</p>
-                          <p className="text-slate-500 text-[10px] uppercase font-mono mt-0.5">
-                            {new Date(lead.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
+                          {sent.icon}
+                        </span>
+                      </td>
 
-                    {/* Phone */}
-                    <td className="px-5 py-4 font-mono text-gold-400 font-bold tracking-wider text-sm">
-                      {lead.phone}
-                    </td>
+                      {/* WhatsApp Sent */}
+                      <td className="px-5 py-4 text-center">
+                        {lead.whatsappSent ? (
+                            <div className="inline-flex items-center gap-1 bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded text-[10px] font-bold uppercase shadow-sm mx-auto">
+                              <CheckCircle2 size={12} />
+                              Sent
+                            </div>
+                        ) : (
+                            <div className="inline-flex items-center gap-1 text-slate-500 px-2 py-0.5 text-[10px] font-bold uppercase mx-auto">
+                              <MessageCircle size={12} className="opacity-40" />
+                              No
+                            </div>
+                        )}
+                      </td>
 
-                    {/* Disposition */}
-                    <td className="px-5 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-widest border ${dispo.cls}`}>
-                        {dispo.icon}
-                        {dispo.label}
-                      </span>
-                    </td>
+                      {/* Duration */}
+                      <td className="px-5 py-4 font-mono text-slate-400 text-xs">
+                        {mins > 0 ? `${mins}m ` : ''}{secs}s
+                      </td>
 
-                    {/* Sentiment */}
-                    <td className="px-5 py-4 text-center">
-                      <span
-                        className={`text-xl ${sent.cls}`}
-                        title={sent.label}
-                        role="img"
-                        aria-label={sent.label}
-                      >
-                        {sent.icon}
-                      </span>
-                    </td>
-
-                    {/* WhatsApp Sent */}
-                    <td className="px-5 py-4 text-center">
-                       {lead.whatsappSent ? (
-                          <div className="inline-flex items-center gap-1 bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded text-[10px] font-bold uppercase shadow-sm mx-auto">
-                             <CheckCircle2 size={12} />
-                             Sent
-                          </div>
-                       ) : (
-                          <div className="inline-flex items-center gap-1 text-slate-500 px-2 py-0.5 text-[10px] font-bold uppercase mx-auto">
-                             <MessageCircle size={12} className="opacity-40" />
-                             No
-                          </div>
-                       )}
-                    </td>
-
-                    {/* Duration */}
-                    <td className="px-5 py-4 font-mono text-slate-400 text-xs">
-                      {mins > 0 ? `${mins}m ` : ''}{secs}s
-                    </td>
-
-                    {/* Re-Dial */}
-                    <td className="px-5 py-4 text-right">
-                      <button
-                        onClick={() => makeCall(lead.phone)}
-                        disabled={callStatus !== 'Idle' || lead.disposition === 'DNC'}
-                        title={
-                          lead.disposition === 'DNC'
-                            ? 'DNC — Do Not Call'
-                            : callStatus !== 'Idle'
-                              ? 'A call is already active'
-                              : `Re-dial ${lead.phone}`
-                        }
-                        className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all active:scale-90 ml-auto ${
-                          lead.disposition === 'DNC'
-                            ? 'opacity-20 cursor-not-allowed bg-slate-800 text-slate-600 border-slate-700'
-                            : callStatus !== 'Idle'
-                              ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-500 border-slate-700'
-                              : 'bg-slate-800 hover:bg-gold-500/20 text-slate-400 hover:text-gold-400 border-slate-700 hover:border-gold-500/40 shadow-sm'
-                        }`}
-                        aria-label={`Re-dial ${lead.phone}`}
-                      >
-                        <Phone size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                );
+                      {/* Re-Dial */}
+                      <td className="px-5 py-4 text-right">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); makeCall(lead.phone); }}
+                          disabled={callStatus !== 'Idle' || lead.disposition === 'DNC'}
+                          title={
+                            lead.disposition === 'DNC'
+                              ? 'DNC — Do Not Call'
+                              : callStatus !== 'Idle'
+                                ? 'A call is already active'
+                                : `Re-dial ${lead.phone}`
+                          }
+                          className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all active:scale-90 ml-auto ${
+                            lead.disposition === 'DNC'
+                              ? 'opacity-20 cursor-not-allowed bg-slate-800 text-slate-600 border-slate-700'
+                              : callStatus !== 'Idle'
+                                ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-500 border-slate-700'
+                                : 'bg-slate-800 hover:bg-gold-500/20 text-slate-400 hover:text-gold-400 border-slate-700 hover:border-gold-500/40 shadow-sm'
+                          }`}
+                          aria-label={`Re-dial ${lead.phone}`}
+                        >
+                          <Phone size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                    
+                    {/* Expanded AI Summary Row */}
+                    {expandedRow === idx && (
+                       <tr>
+                         <td colSpan="8" className="px-5 py-4 bg-slate-900/60 border-b border-slate-800/40">
+                            {lead.ai_summary ? (() => {
+                               try {
+                                  const ai = JSON.parse(lead.ai_summary);
+                                  return (
+                                     <div className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 flex flex-col gap-2">
+                                        <div className="text-xs text-slate-300 leading-relaxed font-sans font-medium">
+                                          <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1.5">Call Summary</p>
+                                          {ai.summary}
+                                        </div>
+                                        {ai.nextAction && (
+                                          <div className="mt-1 flex items-start gap-2 bg-purple-500/10 border border-purple-500/20 rounded-lg p-2.5">
+                                            <Target size={14} className="text-purple-400 mt-0.5 shrink-0" />
+                                            <div>
+                                              <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-0.5">Recommended Action</p>
+                                              <p className="text-xs text-purple-200">{ai.nextAction}</p>
+                                            </div>
+                                          </div>
+                                        )}
+                                     </div>
+                                  );
+                               } catch(e) { return <span className="text-slate-500 text-xs">Analysis processing...</span>; }
+                            })() : (
+                               <div className="text-slate-500 text-xs italic p-2">No AI summary generated for this call.</div>
+                            )}
+                            <WhatsAppChat phone={lead.phone} />
+                         </td>
+                       </tr>
+                    )}
+                  </React.Fragment>
               })}
             </tbody>
           </table>
@@ -322,3 +441,4 @@ export default function CustomerLeadsPanel() {
     </div>
   );
 }
+

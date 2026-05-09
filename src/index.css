@@ -38,8 +38,8 @@
 
   /* Gold outlined button — was referenced but missing */
   .btn-outline-gold {
-    @apply bg-transparent border border-gold-500/50 text-gold-400
-           hover:bg-gold-500/10 hover:border-gold-400
+    @apply bg-transparent border border-gold-500 text-gold-400
+           hover:bg-gold-500 hover:bg-opacity-10 hover:border-gold-400
            font-bold py-2 px-4 rounded-lg
            transition-all duration-200 active:scale-95
            disabled:opacity-40 disabled:cursor-not-allowed;
@@ -48,7 +48,7 @@
   /* Text input */
   .input-field {
     @apply w-full bg-slate-800 border border-slate-700 rounded-lg text-slate-100 p-2
-           focus:border-gold-500/60 focus:ring-1 focus:ring-gold-500/30
+           focus:border-gold-500 focus:ring-1 focus:ring-gold-500
            outline-none transition-all placeholder:text-slate-600;
   }
 }

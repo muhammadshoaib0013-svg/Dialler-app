@@ -1,0 +1,18 @@
+{
+  "nav.dashboard": "ڈیش بورڈ",
+  "nav.dialler": "ڈائلر",
+  "nav.leads": "کسٹمر لیڈز",
+  "nav.analytics": "تجزیات",
+  "nav.admin": "ایڈمن",
+  "call.idle": "ڈائل کرنے کے لئے تیار",
+  "call.calling": "کال کی جا رہی ہے...",
+  "call.connected": "منسلک",
+  "call.ended": "کال ختم ہوگئی",
+  "disp.sale": "مکمل فروخت",
+  "disp.cbhold": "واپس کال کریں",
+  "disp.ni": "دلچسپی نہیں",
+  "disp.dnc": "کال نہ کریں",
+  "auth.login": "سائن ان کریں",
+  "auth.username": "ایجنٹ آئی ڈی",
+  "auth.password": "پاس ورڈ"
+}

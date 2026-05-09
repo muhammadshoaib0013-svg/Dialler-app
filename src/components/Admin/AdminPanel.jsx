@@ -4,11 +4,13 @@ import { Users, Activity, FileText, Shield } from 'lucide-react';
 import UserManagement from './UserManagement';
 import LiveMonitor from './LiveMonitor';
 import ScriptManager from './ScriptManager';
+import GoogleSheetsConfig from './GoogleSheetsConfig';
 
 const ADMIN_TABS = [
   { key: 'users',   icon: <Users size={16} />,    label: 'User Management' },
   { key: 'monitor', icon: <Activity size={16} />,  label: 'Live Monitor'    },
   { key: 'scripts', icon: <FileText size={16} />,  label: 'Script Manager'  },
+  { key: 'settings',icon: <FileText size={16} />,  label: 'System Settings' },
 ];
 
 export default function AdminPanel() {
@@ -19,6 +21,7 @@ export default function AdminPanel() {
       case 'users':   return <UserManagement key="users" />;
       case 'monitor': return <LiveMonitor    key="monitor" />;
       case 'scripts': return <ScriptManager  key="scripts" />;
+      case 'settings': return <GoogleSheetsConfig key="settings" />;
       default:        return <UserManagement key="users" />;
     }
   };

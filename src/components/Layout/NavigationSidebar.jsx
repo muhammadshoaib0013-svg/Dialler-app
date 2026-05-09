@@ -1,22 +1,26 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, PhoneCall, Database, BarChart3, HardDrive, PhoneOff, Shield, Settings, Menu, X } from 'lucide-react';
+import { LayoutDashboard, PhoneCall, Database, BarChart3, BarChart2, HardDrive, PhoneOff, Shield, Settings, Menu, X, Globe } from 'lucide-react';
 import { useCallContext } from '../../context/CallContext';
+import { useTheme } from '../../context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 
 export default function NavigationSidebar({ activeTab, setActiveTab }) {
   const { agentAuth, userRole, setIsServerSetupOpen } = useCallContext();
-  const [{ isOpen }, setDrawerState] = useState({ isOpen: false });
+  const { companyName } = useTheme();
+  const { t, i18n } = useTranslation();
+  const [mobileOpen, setMobileOpen] = useState(false);
   
   const AGENT_TABS = [
-    { key: 'cockpit',     icon: <LayoutDashboard size={20} />, label: 'Cockpit'           },
-    { key: 'omnichannel', icon: <PhoneCall size={20} />,       label: 'Omnichannel Center' },
-    { key: 'leadvault',   icon: <Database size={20} />,        label: 'Lead Vault'         },
-    { key: 'analytics',   icon: <BarChart3 size={20} />,       label: 'Analytics'          },
-    { key: 'reporting',   icon: <BarChart3 size={20} />,       label: 'Advanced Reports'   },
-    { key: 'vault',       icon: <HardDrive size={20} />,       label: 'Vault'              },
+    { key: 'cockpit',     icon: <LayoutDashboard size={20} />, label: t('nav.dashboard') },
+    { key: 'omnichannel', icon: <PhoneCall size={20} />,       label: t('nav.dialler') || 'Omnichannel Center' },
+    { key: 'leadvault',   icon: <Database size={20} />,        label: t('nav.leads') },
+    { key: 'analytics',   icon: <BarChart2 size={20} />,       label: t('nav.analytics') },
+    { key: 'reporting',   icon: <BarChart3 size={20} />,       label: 'Advanced Reports' },
+    { key: 'vault',       icon: <HardDrive size={20} />,       label: 'Vault' },
   ];
 
   const ADMIN_ONLY_TABS = [
-    { key: 'admin', icon: <Shield size={20} />, label: 'Admin Control' },
+    { key: 'admin', icon: <Shield size={20} />, label: t('nav.admin') },
   ];
 
   const TABS = userRole === 'admin' ? [...AGENT_TABS, ...ADMIN_ONLY_TABS] : AGENT_TABS;
@@ -24,29 +28,21 @@ export default function NavigationSidebar({ activeTab, setActiveTab }) {
   return (
     <>
       {/* Mobile Top Bar */}
-      <div className="md:hidden fixed top-0 left-0 w-full h-[56px] z-50 bg-slate-950 border-b border-slate-800 flex items-center px-4">
-        <button 
-          onClick={() => setDrawerState({ isOpen: true })}
-          className="text-slate-300 hover:text-white transition-colors p-2 -ml-2 rounded-lg"
-        >
+      <div className="md:hidden flex items-center p-4 border-b border-slate-800 bg-slate-950 fixed top-0 left-0 w-full z-50">
+        <button onClick={() => setMobileOpen(true)} className="p-2 text-slate-400 hover:text-gold-400">
           <Menu size={24} />
         </button>
+        <span className="ml-4 text-gold-500 font-bold" style={{ color: 'var(--brand-gold)' }}>{companyName}</span>
       </div>
 
       {/* Mobile Backdrop */}
-      {isOpen && (
-        <div 
-          className="md:hidden fixed inset-0 bg-black/60 z-[59]"
-          onClick={() => setDrawerState({ isOpen: false })}
-        />
+      {mobileOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[59] md:hidden" onClick={() => setMobileOpen(false)} />
       )}
 
-      <aside className={`fixed md:relative top-0 left-0 h-full w-68 bg-slate-950 border-r border-slate-800 flex flex-col items-center py-6 z-[60] md:z-10 shrink-0 shadow-2xl transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:flex`}>
+      <aside className={`fixed inset-y-0 left-0 z-[60] flex flex-col transition-transform duration-300 md:relative md:translate-x-0 bg-slate-950 border-r border-slate-800 items-center py-6 shadow-2xl w-68 shrink-0 ${mobileOpen ? "" : "-translate-x-full md:translate-x-0"}`}>
         {/* Mobile Close Button */}
-        <button 
-          className="md:hidden absolute top-4 right-4 text-slate-400 hover:text-white p-1 z-50"
-          onClick={() => setDrawerState({ isOpen: false })}
-        >
+        <button onClick={() => setMobileOpen(false)} className="md:hidden absolute top-4 right-4 text-slate-500 hover:text-white p-1 z-50">
           <X size={20} />
         </button>
 
@@ -115,6 +111,20 @@ export default function NavigationSidebar({ activeTab, setActiveTab }) {
            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
            <PhoneOff className="mx-auto text-slate-500 mb-2 drop-shadow-md group-hover:text-cyan-400 transition-colors duration-300" size={22} />
            <p className="text-[10px] text-slate-400 font-mono tracking-widest uppercase text-center group-hover:text-cyan-300 transition-colors">WebRTC Active</p>
+        </div>
+
+        {/* Language Selector */}
+        <div className="flex items-center gap-2 mt-4 px-2">
+          <Globe size={14} className="text-slate-500" />
+          <select 
+            value={i18n.language} 
+            onChange={(e) => i18n.changeLanguage(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs rounded-lg py-1 px-2 focus:outline-none"
+          >
+            <option value="en">🇬🇧 English</option>
+            <option value="ur">🇵🇰 اردو</option>
+            <option value="ar">🇸🇦 العربية</option>
+          </select>
         </div>
       </div>
     </aside>

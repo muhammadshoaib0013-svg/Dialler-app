@@ -14,9 +14,13 @@
 import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createServer } from 'http';
-import { randomUUID } from 'crypto';
+import crypto, { randomUUID } from 'crypto';
 import cors from 'cors';
 import db from './db.js';
+import Anthropic from '@anthropic-ai/sdk';
+import { appendCallToSheet } from './sheets.js';
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const app  = express();
 const PORT = 3001;
@@ -27,74 +31,39 @@ app.use(express.json());
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/tts/health', (_req, res) => res.json({ ok: true, engine: 'edge-neural' }));
 
-// ── Call Logs ────────────────────────────────────────────────────────────────
-app.post('/api/calls', (req, res) => {
-  const { agentId, agentName, campaign, customerName, phone, callStartTime, callAnswerTime, callEndTime, totalDuration, ringDuration, talkDuration, disposition, dispositionLabel, sentiment, whatsappSent, recordingId, recordingUrl, transcript } = req.body;
-  try {
-    const stmt = db.prepare(`
-      INSERT INTO call_logs (
-        agent_id, agent_name, campaign, customer_name, phone, call_start, call_answer, call_end, total_duration, ring_duration, talk_duration, disposition, disposition_label, sentiment, whatsapp_sent, recording_id, recording_url, transcript
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const info = stmt.run(agentId, agentName, campaign, customerName, phone, callStartTime, callAnswerTime, callEndTime, totalDuration, ringDuration, talkDuration, disposition, dispositionLabel, sentiment, whatsappSent, recordingId, recordingUrl, transcript);
-    res.json({ ok: true, id: info.lastInsertRowid });
-  } catch (err) {
-    console.error('Insert call_logs error:', err);
-    res.status(500).json({ error: err.message });
-  }
+// ── Tenant Resolution Middleware ──────────────────────────────────────────────
+const resolveTenant = (req, res, next) => {
+  req.tenantId = 1; // Default tenant ID for single-tenant mode
+  next();
+};
+
+// ── Tenant API ────────────────────────────────────────────────────────────────
+app.get('/api/tenant/theme', resolveTenant, (req, res) => {
+  const t = db.prepare('SELECT company_name,primary_color,logo_url,welcome_message FROM tenants WHERE id=?').get(req.tenantId);
+  res.json(t || { company_name: 'Dialler Pro', primary_color: '#D4AF37', logo_url: null });
 });
 
-app.get('/api/calls', (req, res) => {
-  const { agentId, limit = 100 } = req.query;
+app.post('/api/tenant/setup', resolveTenant, (req, res) => {
+  const { company_name, primary_color, logo_url, welcome_message, agent_id, agent_name, agent_password, agent_extension } = req.body;
+  
   try {
-    const stmt = db.prepare(`SELECT * FROM call_logs WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?`);
-    const logs = stmt.all(agentId, parseInt(limit, 10));
-    res.json(logs);
-  } catch (err) {
-    console.error('Get call_logs error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── Customer Leads ────────────────────────────────────────────────────────────
-app.post('/api/leads', (req, res) => {
-  const { name, phone, disposition, time, duration, sentiment, recordingId, whatsappSent } = req.body;
-  try {
-    const stmt = db.prepare(`
-      INSERT INTO customer_leads (
-        name, phone, disposition, call_time, duration, sentiment, recording_id, whatsapp_sent
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const info = stmt.run(name, phone, disposition, time, duration, sentiment, recordingId, whatsappSent ? 1 : 0);
-    res.json({ ok: true, id: info.lastInsertRowid });
-  } catch (err) {
-    console.error('Insert customer_leads error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/leads', (req, res) => {
-  const { limit = 200 } = req.query;
-  try {
-    const stmt = db.prepare(`SELECT * FROM customer_leads ORDER BY created_at DESC LIMIT ?`);
-    const leads = stmt.all(parseInt(limit, 10));
-    res.json(leads);
-  } catch (err) {
-    console.error('Get customer_leads error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/leads/:id', (req, res) => {
-  try {
-    const stmt = db.prepare(`DELETE FROM customer_leads WHERE id = ?`);
-    stmt.run(req.params.id);
+    db.prepare('UPDATE tenants SET company_name=?, primary_color=?, logo_url=?, welcome_message=? WHERE id=?').run(
+      company_name, primary_color, logo_url, welcome_message, req.tenantId
+    );
+    
+    if (agent_id) {
+      const id = randomUUID();
+      db.prepare('INSERT OR IGNORE INTO agents (id,agent_id,name,password,extension,role) VALUES (?,?,?,?,?,?)').run(
+        id, agent_id, agent_name, agent_password, agent_extension || 'EXT01', 'admin'
+      );
+    }
     res.json({ ok: true });
-  } catch (err) {
-    console.error('Delete customer_leads error:', err);
-    res.status(500).json({ error: err.message });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+
 
 // ── VOS3000 Ping ─────────────────────────────────────────────────────────────
 app.post('/api/vos/ping', (req, res) => {
@@ -221,6 +190,64 @@ app.post('/api/whatsapp/send', async (req, res) => {
   }
 });
 
+// ── WhatsApp Webhook ────────────────────────────────────────────────────────
+app.post('/api/whatsapp/webhook', (req, res) => {
+  // Verify webhook signature
+  const sig = req.headers['x-hub-signature-256'];
+  if (!process.env.WHATSAPP_WEBHOOK_SECRET) return res.sendStatus(200); // Skip if no secret
+  
+  if (sig) {
+    const expected = 'sha256=' + crypto.createHmac('sha256', process.env.WHATSAPP_WEBHOOK_SECRET).update(JSON.stringify(req.body)).digest('hex');
+    if (sig !== expected) return res.sendStatus(403);
+  }
+  
+  const entry = req.body.entry?.[0]?.changes?.[0]?.value;
+  if (entry?.messages?.[0]) {
+    const msg = entry.messages[0];
+    db.prepare('INSERT INTO whatsapp_messages (phone,direction,text,ts) VALUES (?,?,?,?)').run(msg.from, 'in', msg.text?.body, msg.timestamp);
+    // Future: Broadcast to WebSocket
+  }
+  res.sendStatus(200);
+});
+
+app.get('/api/whatsapp/webhook', (req, res) => {
+  if (req.query['hub.verify_token'] === process.env.WHATSAPP_VERIFY_TOKEN) res.send(req.query['hub.challenge']);
+  else res.sendStatus(403);
+});
+
+app.get('/api/whatsapp/messages', verifyToken, (req, res) => {
+  const { phone } = req.query;
+  if (!phone) return res.status(400).json({ error: 'Missing phone' });
+  const rows = db.prepare('SELECT * FROM whatsapp_messages WHERE phone = ? ORDER BY ts ASC').all(phone);
+  res.json({ ok: true, data: rows });
+});
+
+app.post('/api/whatsapp/messages', verifyToken, (req, res) => {
+  const { phone, text } = req.body;
+  if (!phone || !text) return res.status(400).json({ error: 'Missing phone or text' });
+  // Store it locally immediately
+  db.prepare('INSERT INTO whatsapp_messages (phone,direction,text,ts) VALUES (?,?,?,?)').run(phone, 'out', text, Date.now().toString());
+  // Future: Send to Meta API
+  res.json({ ok: true });
+});
+
+// ── QA Endpoints ────────────────────────────────────────────────────────────
+app.post('/api/qa/score', verifyToken, (req, res) => {
+  const { callLogId, reviewerId, tenantId, greeting, pitch, objection, close, compliance, notes } = req.body;
+  const total = (greeting || 0) + (pitch || 0) + (objection || 0) + (close || 0) + (compliance || 0);
+  const stmt = db.prepare('INSERT INTO qa_scores (call_log_id, reviewer_id, tenant_id, score_greeting, score_pitch, score_objection, score_close, score_compliance, total_score, notes) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  const info = stmt.run(callLogId, reviewerId, tenantId, greeting, pitch, objection, close, compliance, total, notes);
+  res.json({ ok: true, id: info.lastInsertRowid, total });
+});
+
+app.get('/api/qa/scores', verifyToken, (req, res) => {
+  const { agentId } = req.query;
+  const rows = agentId 
+    ? db.prepare('SELECT q.* FROM qa_scores q JOIN call_logs c ON q.call_log_id = c.id WHERE c.agent_id = ?').all(agentId)
+    : db.prepare('SELECT * FROM qa_scores').all();
+  res.json({ ok: true, data: rows });
+});
+
 // ── HTTP POST  /api/auth/login ──────────────────────────────────────────────
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
@@ -232,6 +259,142 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   return res.status(401).json({ error: 'Invalid credentials' });
+});
+
+// Dummy verifyToken middleware (replace with real JWT validation later)
+const verifyToken = (req, res, next) => {
+  const auth = req.headers.authorization;
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  req.user = { role: 'admin' }; // Mock user role for /api/agents
+  next();
+};
+
+app.post('/api/calls', verifyToken, (req, res) => {
+  const stmt = db.prepare('INSERT INTO call_logs (agent_id,agent_name,campaign,customer_name,phone,call_start,call_end,total_duration,talk_duration,disposition,disposition_label,sentiment,whatsapp_sent,recording_id,transcript, ai_summary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  const r = req.body;
+  const info = stmt.run(r.agentId,r.agentName,r.campaign,r.customerName,r.phone,r.callStart,r.callEnd,r.totalDuration,r.talkDuration,r.disposition,r.dispositionLabel,r.sentiment,r.whatsappSent?1:0,r.recordingId,r.transcript, r.aiSummary || null);
+  
+  if (process.env.GOOGLE_SHEET_ID) {
+    appendCallToSheet(process.env.GOOGLE_SHEET_ID, r).catch(console.error);
+  }
+  
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+app.get('/api/calls', verifyToken, (req, res) => {
+  const { agentId, limit=100, offset=0 } = req.query;
+  const q = `SELECT c.*, q.total_score as qa_score, q.id as qa_id FROM call_logs c LEFT JOIN qa_scores q ON c.id = q.call_log_id`;
+  const rows = agentId
+    ? db.prepare(q + ' WHERE c.agent_id=? ORDER BY c.created_at DESC LIMIT ? OFFSET ?').all(agentId, +limit, +offset)
+    : db.prepare(q + ' ORDER BY c.created_at DESC LIMIT ? OFFSET ?').all(+limit, +offset);
+  res.json({ ok: true, data: rows });
+});
+
+app.post('/api/leads', verifyToken, (req, res) => {
+  const r = req.body;
+  const stmt = db.prepare('INSERT INTO customer_leads (name,phone,disposition,call_time,duration,sentiment,recording_id,whatsapp_sent, lead_score) VALUES (?,?,?,?,?,?,?,?,?)');
+  const info = stmt.run(r.name, r.phone, r.disposition, r.time, r.duration, r.sentiment, r.recordingId, r.whatsappSent ? 1 : 0, r.leadScore || 0);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+app.get('/api/leads', verifyToken, (req, res) => {
+  const { limit=200, offset=0 } = req.query;
+  const rows = db.prepare('SELECT * FROM customer_leads ORDER BY created_at DESC LIMIT ? OFFSET ?').all(+limit, +offset);
+  res.json({ ok: true, data: rows });
+});
+
+app.get('/api/agents', verifyToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  res.json({ ok: true, data: db.prepare('SELECT id,agent_id,name,extension,role,status FROM agents').all() });
+});
+
+app.post('/api/agents', verifyToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const { agentId, name, password, extension } = req.body;
+  const id = randomUUID();
+  db.prepare('INSERT INTO agents (id,agent_id,name,password,extension) VALUES (?,?,?,?,?)').run(id,agentId,name,password,extension);
+  res.json({ ok: true, id });
+});
+
+// ── AI Summary ────────────────────────────────────────────────────────────────
+app.post('/api/ai/summarize', verifyToken, async (req, res) => {
+  const { transcript, disposition, duration, customerName } = req.body;
+  if (!transcript || transcript.length < 50) return res.json({ summary: '', leadScore: 0 });
+  
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    messages: [{ role: 'user', content: `
+Call transcript for ${customerName}, disposition: ${disposition}, duration: ${duration}s.
+Transcript: ${transcript.slice(0, 2000)}
+
+Respond ONLY with JSON: {
+  "summary": "2-3 sentence professional call summary",
+  "keyPoints": ["point1", "point2"],
+  "leadScore": 0-100,
+  "scoreReason": "one sentence explanation",
+  "nextAction": "specific recommended next step"
+}
+
+Lead score guide: 0-20=DNC/hostile, 21-40=not interested, 41-60=lukewarm, 61-80=interested/callback, 81-100=ready to buy/sale`}]
+  });
+  try { res.json(JSON.parse(msg.content[0].text)); }
+  catch { res.json({ summary: '', leadScore: 0 }); }
+});
+
+// ── Dialler Check ─────────────────────────────────────────────────────────────
+app.get('/api/dialler/can-dial', (req, res) => {
+  const { agentId } = req.query;
+  if (!agentId) return res.status(400).json({ error: 'Missing agentId' });
+
+  // Get limits
+  let maxPerHour = 60, maxPerDay = 400;
+  try {
+    const s1 = db.prepare('SELECT value FROM settings WHERE key=?').get('dialler_max_per_hour');
+    const s2 = db.prepare('SELECT value FROM settings WHERE key=?').get('dialler_max_per_day');
+    if (s1) maxPerHour = parseInt(s1.value, 10);
+    if (s2) maxPerDay = parseInt(s2.value, 10);
+  } catch (e) {}
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const hourStart = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+
+  const dayCount = db.prepare('SELECT COUNT(*) as c FROM call_logs WHERE agent_id=? AND created_at >= ?').get(agentId, todayStart).c;
+  const hourCount = db.prepare('SELECT COUNT(*) as c FROM call_logs WHERE agent_id=? AND created_at >= ?').get(agentId, hourStart).c;
+
+  res.json({
+    canDial: hourCount < maxPerHour && dayCount < maxPerDay,
+    callsThisHour: hourCount,
+    callsToday: dayCount,
+    maxPerHour,
+    maxPerDay
+  });
+});
+
+// ── Campaigns ─────────────────────────────────────────────────────────────────
+app.get('/api/campaigns', (req, res) => {
+  res.json({ ok: true, data: db.prepare('SELECT * FROM campaigns ORDER BY created_at DESC').all() });
+});
+
+app.post('/api/campaigns/:id/leads', (req, res) => {
+  const { id } = req.params;
+  const { leads } = req.body;
+  if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: 'Invalid leads array' });
+
+  const stmt = db.prepare('INSERT OR IGNORE INTO customer_leads (name, phone, disposition) VALUES (?, ?, ?)');
+  const updateCamp = db.prepare('UPDATE campaigns SET total_leads = total_leads + ? WHERE id = ?');
+
+  let inserted = 0;
+  db.transaction(() => {
+    for (const phone of leads) {
+      const info = stmt.run('Unknown', phone, 'NEW');
+      if (info.changes > 0) inserted++;
+    }
+    if (inserted > 0) updateCamp.run(inserted, id);
+  })();
+
+  res.json({ ok: true, inserted });
 });
 
 // ── HTTP POST  /api/tts  → returns MP3 binary ─────────────────────────────────
